@@ -1,0 +1,42 @@
+:root {
+  color-scheme: light dark;
+  --accent: #1f5fa8;
+  --ok: #1e7b34;
+  --err: #b3261e;
+  --muted: #777;
+}
+body {
+  font: 14px/1.4 system-ui, sans-serif;
+  margin: 0;
+}
+body.page {
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+h1 { font-size: 1.4rem; color: var(--accent); }
+label { display: block; margin: 0.9rem 0; }
+label input:not([type=checkbox]), label select {
+  display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem; padding: 0.4rem; font: inherit;
+}
+label.check { display: flex; gap: 0.5rem; align-items: flex-start; }
+.buttons { display: flex; gap: 0.5rem; margin-top: 1.2rem; }
+button { font: inherit; padding: 0.4rem 0.9rem; cursor: pointer; }
+button[type=submit] { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 4px; }
+.status { white-space: pre-wrap; padding: 0.6rem; border-radius: 4px; border: 1px solid; font: inherit; }
+.status.ok { border-color: var(--ok); color: var(--ok); }
+.status.err { border-color: var(--err); color: var(--err); }
+
+/* popup */
+body.popup { width: 340px; padding: 0.8rem; }
+.popup header { display: flex; justify-content: space-between; align-items: center; }
+.popup h1 { font-size: 1rem; margin: 0; }
+.popup .server { color: var(--muted); font-size: 0.85rem; margin: 0.4rem 0; }
+.popup .dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--muted); margin-right: 0.3rem; }
+.popup .dot.ok { background: var(--ok); }
+.popup .dot.err { background: var(--err); }
+.popup ul { list-style: none; padding: 0; margin: 0.5rem 0; max-height: 300px; overflow-y: auto; }
+.popup li { padding: 0.35rem 0; border-top: 1px solid rgba(128, 128, 128, 0.3); font-size: 0.85rem; }
+.popup li .meta { color: var(--muted); font-size: 0.8rem; }
+.popup li.error .what { color: var(--err); }
+.popup a { color: var(--accent); }

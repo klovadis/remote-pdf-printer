@@ -1,0 +1,29 @@
+[Unit]
+Description=WebApp PDF-Druckserver
+After=network-online.target cups.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=remote-pdf
+Group=remote-pdf
+ExecStart=/opt/remote-pdf-printer/venv/bin/remote-pdf-printer -c /etc/remote-pdf-printer/config.toml
+Restart=on-failure
+RestartSec=5
+# Gruppe darf abgelegte PDFs lesen (Dateien werden mit 0640 angelegt)
+UMask=0027
+
+# Härtung
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/remote-pdf
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

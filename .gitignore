@@ -1,0 +1,13 @@
+node_modules/
+extension/web-ext-artifacts/
+extension/.amo-upload-uuid
+__pycache__/
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+# Schlüssel und lokale Konfiguration niemals einchecken
+*.key
+*.srl
+config.toml
+tls/

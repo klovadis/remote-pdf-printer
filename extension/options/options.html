@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Remote PDF Printer – Einstellungen</title>
+  <link rel="stylesheet" href="../ui.css">
+</head>
+<body class="page">
+  <h1>Remote PDF Printer</h1>
+  <form id="form">
+    <label>Server-Adresse
+      <input id="serverUrl" type="url" placeholder="https://192.168.1.20:8443" required>
+    </label>
+    <label>API-Token (wie <code>api_token</code> in der config.toml)
+      <input id="token" type="password" autocomplete="off" required minlength="16">
+    </label>
+    <label class="check"><input id="enabled" type="checkbox"> PDFs abfangen und an den Server senden</label>
+    <label>Benachrichtigungen
+      <select id="notify">
+        <option value="all">bei jedem Dokument</option>
+        <option value="errors">nur bei Fehlern</option>
+        <option value="none">keine</option>
+      </select>
+    </label>
+    <label class="check"><input id="captureForeign" type="checkbox">
+      Auch PDFs abfangen, die WebApp von anderen Domains lädt (erfordert Zugriff auf alle Websites)</label>
+    <label class="check"><input id="debug" type="checkbox">
+      Debug-Modus (protokolliert in der Browser-Konsole, Strg+Umschalt+J)</label>
+    <div class="buttons">
+      <button type="submit">Speichern</button>
+      <button type="button" id="test">Verbindung testen</button>
+    </div>
+  </form>
+  <pre id="status" class="status" hidden></pre>
+  <script src="options.js"></script>
+</body>
+</html>
