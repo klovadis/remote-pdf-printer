@@ -33,6 +33,11 @@ function debug(...args) {
   if (settings?.debug) console.log("[PDF-Drucker]", ...args);
 }
 
+// Problems are always logged (also without debug mode), visible in the browser console (Ctrl+Shift+J).
+function warn(...args) {
+  console.warn("[PDF-Drucker]", ...args);
+}
+
 // ---------------------------------------------------------------------------------------
 // Sending to the server
 // ---------------------------------------------------------------------------------------
@@ -51,10 +56,12 @@ function looksLikePdf(bytes) {
 
 async function sendPdf(bytes, meta) {
   await settingsReady;
-  if (!settings.enabled) return { browser: "show", skipped: "disabled" };
+  if (!settings.enabled) return { browser: "show", skipped: "disabled", reason: "Erweiterung ist ausgeschaltet" };
   if (!settings.serverUrl || !settings.token) {
+    const reason = "Server-Adresse oder Token fehlt in den Einstellungen der Erweiterung";
+    warn(reason);
     notify("error", "Nicht eingerichtet", "Bitte Server-Adresse und Token in den Einstellungen der Erweiterung eintragen.");
-    return { browser: "show", error: "not configured" };
+    return { browser: "show", error: "not configured", reason };
   }
   const hash = await sha256Hex(bytes);
   const now = Date.now();
@@ -62,19 +69,23 @@ async function sendPdf(bytes, meta) {
   const hit = recentHashes.get(hash);
   if (hit) {
     debug("Duplikat, nutze vorherige Entscheidung", meta);
-    return hit.promise;
+    return hit.promise.then((d) => ({ ...d, reason: "Duplikat – " + d.reason }));
   }
   const promise = postToServer(bytes, meta);
   recentHashes.set(hash, { time: now, promise });
   return promise;
 }
 
+class ServerError extends Error {}
+
 async function postToServer(bytes, meta) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   const entry = { time: Date.now(), filename: meta.filename || "", method: meta.method };
+  const url = settings.serverUrl.replace(/\/+$/, "") + "/api/documents";
+  const started = performance.now();
   try {
-    const res = await fetch(settings.serverUrl.replace(/\/+$/, "") + "/api/documents", {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: "Bearer " + settings.token,
@@ -89,7 +100,10 @@ async function postToServer(bytes, meta) {
       signal: ctrl.signal,
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    if (!res.ok) {
+      const hint = { 401: " – Token in der Erweiterung stimmt nicht mit api_token überein", 403: " – Adresse nicht in allowed_clients (Server) bzw. vom Proxy gesperrt" }[res.status] || "";
+      throw new ServerError(`Server lehnt ab: HTTP ${res.status}${body.error ? " " + body.error : ""}${hint}`);
+    }
     const decision = body.browser === "suppress" ? "suppress" : "show";
     Object.assign(entry, {
       label: body.label || body.category,
@@ -99,7 +113,13 @@ async function postToServer(bytes, meta) {
       error: (body.errors || []).join("; ") || null,
       duplicate: !!body.duplicate,
     });
-    debug("Server-Entscheidung", meta, body);
+    const ms = Math.round(performance.now() - started);
+    const actions = [body.printed && `gedruckt auf ${body.printed.printer}`, body.stored && "abgelegt"].filter(Boolean).join(", ");
+    const reason = entry.error
+      ? `Server meldet Fehler (${entry.label}): ${entry.error}`
+      : `Server: ${entry.label} → ${actions || "keine Aktion"} (${ms} ms)`;
+    if (entry.error) warn(reason, meta);
+    else debug(reason, meta, body);
     if (!body.duplicate) {
       if (entry.error) notify("error", `${entry.label}: Problem`, entry.error + "\nDas PDF wird normal angezeigt.");
       else {
@@ -107,12 +127,20 @@ async function postToServer(bytes, meta) {
         notify("info", entry.label, (what || "an Server gesendet") + (meta.filename ? `\n${meta.filename}` : ""));
       }
     }
-    return { ...body, browser: decision };
+    return { ...body, browser: decision, reason };
   } catch (err) {
-    const msg = err.name === "AbortError" ? "Zeitüberschreitung" : err.message;
-    Object.assign(entry, { browser: "show", error: `Server nicht erreichbar: ${msg}` });
-    notify("error", "Druckserver nicht erreichbar", `${msg}\nDas PDF wird normal angezeigt.`);
-    return { browser: "show", error: msg };
+    let reason;
+    if (err instanceof ServerError) reason = err.message;
+    else if (err.name === "AbortError") reason = `Server nicht erreichbar: keine Antwort nach ${REQUEST_TIMEOUT_MS / 1000} s (${url})`;
+    else
+      reason =
+        `Server nicht erreichbar (${url}): ${err.message} – läuft der Server, stimmt die Adresse` +
+        (url.startsWith("https:") ? ", vertraut Firefox dem Zertifikat?" : "?");
+    warn(reason, meta);
+    Object.assign(entry, { browser: "show", error: reason });
+    const title = err instanceof ServerError ? "Druckserver lehnt ab" : "Druckserver nicht erreichbar";
+    notify("error", title, `${reason}\nDas PDF wird normal angezeigt.`);
+    return { browser: "show", error: reason, reason };
   } finally {
     clearTimeout(timer);
     addLogEntry(entry);
@@ -208,8 +236,8 @@ async function onHeadersReceived(details) {
   const chunks = [];
   filter.ondata = (e) => chunks.push(new Uint8Array(e.data));
   filter.onerror = () => {
-    debug("Filterfehler", filter.error);
-    resolveDecision({ browser: "show" });
+    warn("Fehler beim Mitlesen der PDF-Antwort", details.url, filter.error);
+    resolveDecision({ browser: "show", reason: "Filterfehler: " + filter.error });
   };
   filter.onstop = async () => {
     const size = chunks.reduce((n, c) => n + c.length, 0);
@@ -219,14 +247,16 @@ async function onHeadersReceived(details) {
       bytes.set(c, off);
       off += c.length;
     }
-    let decision = { browser: "show" };
+    let decision = { browser: "show", reason: "Antwort enthält keine PDF-Daten" };
     try {
       if (looksLikePdf(bytes)) {
         decision = await sendPdf(bytes, { filename, url: details.url, method: "http:" + details.type, tabId: details.tabId });
       }
     } catch (err) {
-      console.error("[PDF-Drucker]", err);
+      warn("Unerwarteter Fehler", err);
+      decision = { browser: "show", reason: "Unerwarteter Fehler: " + err };
     }
+    debug("Entscheidung", "http:" + details.type, decision.browser, "–", decision.reason, details.url);
     resolveDecision(decision);
     if (decision.browser !== "suppress") {
       filter.write(bytes);
@@ -315,7 +345,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
     case "pdf":
       return (async () => {
         const bytes = new Uint8Array(msg.bytes);
-        if (!looksLikePdf(bytes)) return { browser: "show", notPdf: true };
+        if (!looksLikePdf(bytes)) return { browser: "show", notPdf: true, reason: "keine PDF-Daten (Kennung %PDF fehlt)" };
         return sendPdf(bytes, {
           filename: msg.filename,
           url: msg.pageUrl || sender.url,

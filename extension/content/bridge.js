@@ -21,7 +21,7 @@
     }
     if (kind !== "req") return;
     const id = data.id;
-    let decision = { browser: "show" };
+    let decision = { browser: "show", reason: "keine Antwort" };
     try {
       // The blob comes from the page; read it through the DOM API to get our own ArrayBuffer.
       const bytes = await data.blob.arrayBuffer();
@@ -32,9 +32,13 @@
         pageUrl: location.href,
         method: String(data.method || "blob"),
       });
-      if (res && res.browser === "suppress") decision = { browser: "suppress" };
+      decision = {
+        browser: res && res.browser === "suppress" ? "suppress" : "show",
+        reason: String((res && res.reason) || ""),
+      };
     } catch (err) {
       console.warn("[PDF-Drucker]", err);
+      decision = { browser: "show", reason: `Hintergrundskript nicht erreichbar: ${err}` };
     }
     toPage({ kind: "res", id, decision });
   });

@@ -65,12 +65,11 @@
     if (entry.decision) return entry.decision;
     entry.used = true;
     entry.decision = new Promise((resolve) => {
-      if (!entry.blob) return resolve({ browser: "show" });
+      if (!entry.blob) return resolve({ browser: "show", reason: "PDF-Daten nicht verfügbar" });
       const id = ++seq;
       const timer = setTimeout(() => {
         waiting.delete(id);
-        log("Keine Antwort vom Hintergrundskript, zeige PDF normal", url);
-        resolve({ browser: "show" });
+        resolve({ browser: "show", reason: `keine Antwort der Erweiterung nach ${DECISION_TIMEOUT_MS / 1000} s` });
       }, DECISION_TIMEOUT_MS);
       waiting.set(id, (d) => {
         clearTimeout(timer);
@@ -79,7 +78,7 @@
       log("Sende PDF", { method, filename, size: entry.blob.size });
       window.postMessage({ [TAG]: "req", id, blob: entry.blob, method, filename: filename || "" }, "*");
     });
-    entry.decision.then((d) => log("Entscheidung", method, d.browser));
+    entry.decision.then((d) => log("Entscheidung", method, d.browser + (d.reason ? " – " + d.reason : "")));
     return entry.decision;
   }
 
@@ -91,7 +90,8 @@
         const resolve = waiting.get(d.id);
         if (resolve) {
           waiting.delete(d.id);
-          resolve(d.decision && d.decision.browser === "suppress" ? { browser: "suppress" } : { browser: "show" });
+          const dec = d.decision || {};
+          resolve({ browser: dec.browser === "suppress" ? "suppress" : "show", reason: String(dec.reason || "") });
         }
         break;
       }
