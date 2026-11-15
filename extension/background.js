@@ -1,11 +1,18 @@
-/* Remote PDF Printer – background script (Firefox, MV3 event page).
+/* Remote PDF Printer – background script.
+ * Firefox: MV3 event page. Chrome: MV3 service worker. Same file for both.
  *
- * Two capture paths end up in sendPdf():
- *  1. HTTP responses that are PDFs (new tab, iframe, download) via webRequest.filterResponseData.
- *  2. PDF blobs / data: URLs created inside the WebApp page, reported by content/bridge.js.
- * The server answers with a decision; "show" lets Firefox behave as usual, "suppress" hides the PDF.
+ * Capture paths that end up in sendPdf():
+ *  1. PDF blobs / data: URLs created inside the WebApp page, reported by content/bridge.js (both browsers).
+ *  2. Firefox: HTTP responses that are PDFs (new tab, iframe, download) via webRequest.filterResponseData.
+ *     Chrome:  PDF downloads via the downloads API (paused, re-fetched, then resumed or cancelled).
+ *     Chrome cannot intercept PDFs opened directly in a tab/frame; these are only logged.
+ * The server answers with a decision; "show" lets the browser behave as usual, "suppress" hides the PDF.
  */
 "use strict";
+
+const ext = globalThis.browser ?? globalThis.chrome;
+// Firefox only: read and hold back HTTP responses.
+const CAN_FILTER_RESPONSES = typeof ext.webRequest?.filterResponseData === "function";
 
 const WEBAPP_PATTERNS = ["*://*.example.de/*", "*://*.example.com/*", "*://*.example.net/*"];
 const WEBAPP_HOST = /(^|\.)example\.(de|com|net)$/i;
@@ -22,8 +29,8 @@ const REQUEST_TIMEOUT_MS = 30000;
 const LOG_SIZE = 30;
 
 let settings = null;
-const settingsReady = browser.storage.local.get(DEFAULTS).then((s) => (settings = s));
-browser.storage.onChanged.addListener((changes, area) => {
+const settingsReady = ext.storage.local.get(DEFAULTS).then((s) => (settings = s));
+ext.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !settings) return;
   for (const [k, { newValue }] of Object.entries(changes)) settings[k] = newValue ?? DEFAULTS[k];
   if ("captureForeign" in changes) registerForeignListener();
@@ -135,7 +142,7 @@ async function postToServer(bytes, meta) {
     else
       reason =
         `Server nicht erreichbar (${url}): ${err.message} – läuft der Server, stimmt die Adresse` +
-        (url.startsWith("https:") ? ", vertraut Firefox dem Zertifikat?" : "?");
+        (url.startsWith("https:") ? ", vertraut der Browser dem Zertifikat?" : "?");
     warn(reason, meta);
     Object.assign(entry, { browser: "show", error: reason });
     const title = err instanceof ServerError ? "Druckserver lehnt ab" : "Druckserver nicht erreichbar";
@@ -149,25 +156,23 @@ async function postToServer(bytes, meta) {
 
 function notify(kind, title, message) {
   if (!settings || settings.notify === "none" || (settings.notify === "errors" && kind !== "error")) return;
-  browser.notifications.create({
+  ext.notifications.create({
     type: "basic",
-    iconUrl: browser.runtime.getURL("icons/icon.svg"),
+    iconUrl: ext.runtime.getURL("icons/icon-128.png"),
     title: "PDF-Drucker: " + title,
     message,
   });
 }
 
 async function addLogEntry(entry) {
-  const { log = [] } = await browser.storage.session.get("log");
+  const { log = [] } = await ext.storage.session.get("log");
   log.unshift(entry);
-  await browser.storage.session.set({ log: log.slice(0, LOG_SIZE) });
+  await ext.storage.session.set({ log: log.slice(0, LOG_SIZE) });
 }
 
 // ---------------------------------------------------------------------------------------
-// Path 1: PDF HTTP responses
+// Helpers for HTTP responses and downloads
 // ---------------------------------------------------------------------------------------
-
-const pendingByUrl = new Map(); // url -> Promise<decision>, consulted by the downloads listener
 
 function header(details, name) {
   const h = details.responseHeaders?.find((x) => x.name.toLowerCase() === name);
@@ -175,7 +180,7 @@ function header(details, name) {
 }
 
 function filenameFromDisposition(cd) {
-  let m = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(cd);
+  let m = /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/.exec(cd || "");
   if (m) {
     try {
       return decodeURIComponent(m[1].trim().replace(/^"|"$/g, ""));
@@ -183,7 +188,7 @@ function filenameFromDisposition(cd) {
       /* fall through */
     }
   }
-  m = /filename\s*=\s*"?([^";]+)"?/i.exec(cd);
+  m = /filename\s*=\s*"?([^";]+)"?/i.exec(cd || "");
   return m ? m[1].trim() : "";
 }
 
@@ -196,11 +201,15 @@ function filenameFromUrl(url) {
   }
 }
 
-function isPdfResponse(details, filename) {
-  const ct = header(details, "content-type").toLowerCase();
+function basename(path) {
+  return (path || "").split(/[\\/]/).pop();
+}
+
+function isPdfContentType(ct, filename) {
+  ct = (ct || "").toLowerCase();
   if (ct.includes("application/pdf") || ct.includes("application/x-pdf")) return true;
   const generic = !ct || /octet-stream|binary|force-download|download/.test(ct);
-  return generic && /\.pdf$/i.test(filename);
+  return generic && /\.pdf$/i.test(filename || "");
 }
 
 function hostOf(url) {
@@ -211,18 +220,26 @@ function hostOf(url) {
   }
 }
 
-function isFromWebApp(details) {
-  return [details.url, details.documentUrl, details.originUrl].some((u) => u && WEBAPP_HOST.test(hostOf(u)));
+function anyFromWebApp(...urls) {
+  return urls.some((u) => u && WEBAPP_HOST.test(hostOf(u)));
 }
+
+const RESOURCE_TYPES = ["main_frame", "sub_frame", "object"];
+
+// ---------------------------------------------------------------------------------------
+// Firefox: hold back PDF HTTP responses until the server has decided
+// ---------------------------------------------------------------------------------------
+
+const pendingByUrl = new Map(); // url -> Promise<decision>, consulted by the downloads listener
 
 async function onHeadersReceived(details) {
   await settingsReady;
   if (!settings.enabled || details.tabId < 0) return {};
   if (details.statusCode < 200 || details.statusCode >= 300) return {};
-  if (!isFromWebApp(details)) return {};
+  if (!anyFromWebApp(details.url, details.documentUrl, details.originUrl)) return {};
   const cd = header(details, "content-disposition");
   const filename = filenameFromDisposition(cd) || filenameFromUrl(details.url);
-  if (!isPdfResponse(details, filename)) return {};
+  if (!isPdfContentType(header(details, "content-type"), filename)) return {};
 
   const isAttachment = /^\s*attachment/i.test(cd);
   debug("PDF-Antwort erkannt", details.type, details.url, { filename, isAttachment });
@@ -232,7 +249,7 @@ async function onHeadersReceived(details) {
   pendingByUrl.set(details.url, decisionPromise);
   setTimeout(() => pendingByUrl.delete(details.url), 120000);
 
-  const filter = browser.webRequest.filterResponseData(details.requestId);
+  const filter = ext.webRequest.filterResponseData(details.requestId);
   const chunks = [];
   filter.ondata = (e) => chunks.push(new Uint8Array(e.data));
   filter.onerror = () => {
@@ -265,7 +282,7 @@ async function onHeadersReceived(details) {
     }
     if (details.type !== "main_frame") {
       // Tell the embedding page so it cannot print the (now empty) frame.
-      await browser.tabs
+      await ext.tabs
         .sendMessage(details.tabId, { type: "suppressedUrl", url: details.url }, { frameId: details.parentFrameId ?? 0 })
         .catch(() => {});
     }
@@ -277,41 +294,38 @@ async function onHeadersReceived(details) {
 
 async function closeOrGoBack(tabId) {
   try {
-    const tab = await browser.tabs.get(tabId);
+    const tab = await ext.tabs.get(tabId);
     if (tab.openerTabId != null) {
-      await browser.tabs.update(tab.openerTabId, { active: true }).catch(() => {});
-      await browser.tabs.remove(tabId);
+      await ext.tabs.update(tab.openerTabId, { active: true }).catch(() => {});
+      await ext.tabs.remove(tabId);
     } else {
-      await browser.tabs.goBack(tabId);
+      await ext.tabs.goBack(tabId);
     }
   } catch (err) {
     debug("Tab konnte nicht geschlossen werden", err);
   }
 }
 
-// Downloads of suppressed PDFs would otherwise end up as empty files.
-browser.downloads.onCreated.addListener(async (item) => {
+async function removeDownload(item) {
+  try {
+    await ext.downloads.cancel(item.id).catch(() => {});
+    const [current] = await ext.downloads.search({ id: item.id });
+    if (current?.state === "complete") await ext.downloads.removeFile(item.id).catch(() => {});
+    await ext.downloads.erase({ id: item.id });
+  } catch (err) {
+    warn("Download konnte nicht entfernt werden", err);
+  }
+}
+
+// Firefox: downloads of suppressed PDFs would otherwise end up as empty files.
+async function onDownloadCreatedFirefox(item) {
   const pending = pendingByUrl.get(item.url);
   if (!pending) return;
   const decision = await pending;
   if (decision.browser !== "suppress") return;
   debug("Download unterdrückt", item.url);
-  try {
-    await browser.downloads.cancel(item.id);
-    await browser.downloads.erase({ id: item.id });
-  } catch (err) {
-    debug("Download konnte nicht abgebrochen werden", err);
-  }
-});
-
-const RESOURCE_TYPES = ["main_frame", "sub_frame", "object"];
-
-// Registered synchronously so the event page is woken up for WebApp requests.
-browser.webRequest.onHeadersReceived.addListener(
-  onHeadersReceived,
-  { urls: WEBAPP_PATTERNS, types: RESOURCE_TYPES },
-  ["blocking", "responseHeaders"]
-);
+  await removeDownload(item);
+}
 
 // Optional: PDFs that WebApp loads from other hosts (e.g. cloud storage), needs <all_urls>.
 function onForeignHeadersReceived(details) {
@@ -320,11 +334,12 @@ function onForeignHeadersReceived(details) {
 }
 
 async function registerForeignListener() {
+  if (!CAN_FILTER_RESPONSES) return;
   await settingsReady;
-  browser.webRequest.onHeadersReceived.removeListener(onForeignHeadersReceived);
-  const granted = await browser.permissions.contains({ origins: ["<all_urls>"] });
+  ext.webRequest.onHeadersReceived.removeListener(onForeignHeadersReceived);
+  const granted = await ext.permissions.contains({ origins: ["<all_urls>"] });
   if (settings.captureForeign && granted) {
-    browser.webRequest.onHeadersReceived.addListener(
+    ext.webRequest.onHeadersReceived.addListener(
       onForeignHeadersReceived,
       { urls: ["<all_urls>"], types: RESOURCE_TYPES },
       ["blocking", "responseHeaders"]
@@ -332,38 +347,130 @@ async function registerForeignListener() {
     debug("Fremd-Domains werden mit überwacht");
   }
 }
-registerForeignListener();
-browser.permissions.onAdded.addListener(registerForeignListener);
-browser.permissions.onRemoved.addListener(registerForeignListener);
 
 // ---------------------------------------------------------------------------------------
-// Path 2 + UI messages
+// Chrome: PDF downloads are paused, fetched again by the extension and then resumed or removed
 // ---------------------------------------------------------------------------------------
 
-browser.runtime.onMessage.addListener((msg, sender) => {
+const handledDownloads = new Set();
+
+async function onDownloadCreatedChrome(item) {
+  await settingsReady;
+  if (!settings.enabled || handledDownloads.has(item.id)) return;
+  const url = item.finalUrl || item.url;
+  // blob:/data: downloads were already decided by the page hooks before the download started.
+  if (!/^https?:/i.test(url)) return;
+  const foreignAllowed = settings.captureForeign && (await ext.permissions.contains({ origins: ["<all_urls>"] }));
+  if (!anyFromWebApp(url, item.referrer) || (!anyFromWebApp(url) && !foreignAllowed)) return;
+  if (!isPdfContentType(item.mime, basename(item.filename) || filenameFromUrl(url))) return;
+  handledDownloads.add(item.id);
+
+  debug("PDF-Download erkannt", url);
+  await ext.downloads.pause(item.id).catch(() => {}); // may already be complete for small files
+  let decision;
+  try {
+    const res = await fetch(url, { credentials: "include", cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const filename =
+      basename(item.filename) || filenameFromDisposition(res.headers.get("content-disposition")) || filenameFromUrl(url);
+    decision = looksLikePdf(bytes)
+      ? await sendPdf(bytes, { filename, url, method: "download", tabId: item.tabId })
+      : { browser: "show", reason: "Download enthält keine PDF-Daten" };
+  } catch (err) {
+    decision = { browser: "show", reason: `PDF konnte nicht nachgeladen werden: ${err.message}` };
+    warn(decision.reason, url);
+  }
+  debug("Entscheidung", "download", decision.browser, "–", decision.reason, url);
+  if (decision.browser === "suppress") await removeDownload(item);
+  else await ext.downloads.resume(item.id).catch(() => {});
+}
+
+// Chrome: PDFs opened directly in a tab or frame cannot be held back – log it so it is visible.
+function onHeadersReceivedChrome(details) {
+  if (!settings?.enabled || details.statusCode < 200 || details.statusCode >= 300) return;
+  const cd = header(details, "content-disposition");
+  if (/^\s*attachment/i.test(cd)) return; // handled as download
+  const filename = filenameFromDisposition(cd) || filenameFromUrl(details.url);
+  if (!isPdfContentType(header(details, "content-type"), filename)) return;
+  warn(
+    `PDF wird direkt im ${details.type === "main_frame" ? "Tab" : "Rahmen"} geöffnet – das kann die Chrome-Version ` +
+      "nicht abfangen (nur Firefox). Bitte diese Meldung melden.",
+    details.url
+  );
+}
+
+// ---------------------------------------------------------------------------------------
+// Listener registration (synchronous, so the background wakes up for these events)
+// ---------------------------------------------------------------------------------------
+
+if (CAN_FILTER_RESPONSES) {
+  ext.webRequest.onHeadersReceived.addListener(
+    onHeadersReceived,
+    { urls: WEBAPP_PATTERNS, types: RESOURCE_TYPES },
+    ["blocking", "responseHeaders"]
+  );
+  ext.downloads.onCreated.addListener(onDownloadCreatedFirefox);
+  registerForeignListener();
+  ext.permissions.onAdded.addListener(registerForeignListener);
+  ext.permissions.onRemoved.addListener(registerForeignListener);
+} else {
+  ext.downloads.onCreated.addListener(onDownloadCreatedChrome);
+  ext.webRequest.onHeadersReceived.addListener(
+    onHeadersReceivedChrome,
+    { urls: WEBAPP_PATTERNS, types: ["main_frame", "sub_frame"] },
+    ["responseHeaders"]
+  );
+}
+
+// ---------------------------------------------------------------------------------------
+// Messages from content scripts, popup and options page
+// ---------------------------------------------------------------------------------------
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+function handleMessage(msg, sender) {
   switch (msg?.type) {
-    case "pdf":
-      return (async () => {
-        const bytes = new Uint8Array(msg.bytes);
-        if (!looksLikePdf(bytes)) return { browser: "show", notPdf: true, reason: "keine PDF-Daten (Kennung %PDF fehlt)" };
-        return sendPdf(bytes, {
-          filename: msg.filename,
-          url: msg.pageUrl || sender.url,
-          method: msg.method,
-          tabId: sender.tab?.id,
-        });
-      })();
+    case "pdf": {
+      // Firefox passes an ArrayBuffer, Chrome (JSON messaging) a base64 string.
+      const bytes = msg.base64 != null ? base64ToBytes(msg.base64) : new Uint8Array(msg.bytes);
+      if (!looksLikePdf(bytes)) {
+        return Promise.resolve({ browser: "show", notPdf: true, reason: "keine PDF-Daten (Kennung %PDF fehlt)" });
+      }
+      return sendPdf(bytes, {
+        filename: msg.filename,
+        url: msg.pageUrl || sender.url,
+        method: msg.method,
+        tabId: sender.tab?.id,
+      });
+    }
     case "log":
       // Debug messages from the page hooks.
       debug("[Seite]", ...(msg.args || []));
-      return undefined;
+      return null;
     case "getSettings":
       return settingsReady.then(() => ({ enabled: settings.enabled, debug: settings.debug }));
     case "health":
       return checkHealth(msg.serverUrl, msg.token);
     default:
-      return undefined;
+      return null;
   }
+}
+
+// sendResponse + "return true" works in both Firefox and Chrome.
+ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  const result = handleMessage(msg, sender);
+  if (!result) return false;
+  result.then(sendResponse, (err) => {
+    warn("Fehler bei der Verarbeitung", err);
+    sendResponse({ browser: "show", reason: `Fehler in der Erweiterung: ${err}` });
+  });
+  return true;
 });
 
 async function checkHealth(serverUrl, token) {
@@ -387,7 +494,7 @@ async function checkHealth(serverUrl, token) {
     const msg = err.name === "AbortError" ? "Zeitüberschreitung" : err.message;
     return {
       ok: false,
-      error: `${msg} – laufen Caddy und der Server, vertraut Firefox dem Zertifikat und ist die Berechtigung erteilt?`,
+      error: `${msg} – laufen Caddy und der Server, vertraut der Browser dem Zertifikat und ist die Berechtigung erteilt?`,
     };
   } finally {
     clearTimeout(timer);

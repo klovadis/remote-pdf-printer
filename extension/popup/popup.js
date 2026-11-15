@@ -1,5 +1,7 @@
 "use strict";
 
+const ext = globalThis.browser ?? globalThis.chrome;
+
 const $ = (id) => document.getElementById(id);
 
 function el(tag, cls, text) {
@@ -10,18 +12,18 @@ function el(tag, cls, text) {
 }
 
 async function init() {
-  const s = await browser.storage.local.get({ enabled: true, serverUrl: "" });
+  const s = await ext.storage.local.get({ enabled: true, serverUrl: "" });
   $("enabled").checked = s.enabled;
   $("server").textContent = s.serverUrl || "Kein Server eingerichtet";
 
   if (s.serverUrl) {
-    browser.runtime.sendMessage({ type: "health" }).then((res) => {
+    ext.runtime.sendMessage({ type: "health" }).then((res) => {
       $("dot").className = "dot " + (res.ok ? "ok" : "err");
       if (!res.ok) $("server").textContent = `${s.serverUrl}: ${res.error}`;
     });
   }
 
-  const { log = [] } = await browser.storage.session.get("log");
+  const { log = [] } = await ext.storage.session.get("log");
   const list = $("log");
   if (!log.length) list.append(el("li", "meta", "Noch keine Dokumente in dieser Sitzung."));
   for (const e of log) {
@@ -36,10 +38,10 @@ async function init() {
   }
 }
 
-$("enabled").addEventListener("change", (e) => browser.storage.local.set({ enabled: e.target.checked }));
+$("enabled").addEventListener("change", (e) => ext.storage.local.set({ enabled: e.target.checked }));
 $("options").addEventListener("click", (e) => {
   e.preventDefault();
-  browser.runtime.openOptionsPage();
+  ext.runtime.openOptionsPage();
   window.close();
 });
 

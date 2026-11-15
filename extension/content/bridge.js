@@ -4,6 +4,18 @@
 
 (() => {
   const TAG = "__remotePdfPrinter";
+  const ext = globalThis.browser ?? globalThis.chrome;
+  // Firefox can pass binary data in messages; Chrome serialises messages as JSON.
+  const BINARY_MESSAGES = ext.runtime.getURL("").startsWith("moz-extension:");
+
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).slice(String(reader.result).indexOf(",") + 1));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
 
   function toPage(payload) {
     window.postMessage({ [TAG]: payload.kind, ...payload }, "*");
@@ -16,18 +28,18 @@
     if (!data || typeof data !== "object") return;
     const kind = data[TAG];
     if (kind === "log") {
-      browser.runtime.sendMessage({ type: "log", args: [String(data.text)] }).catch(() => {});
+      ext.runtime.sendMessage({ type: "log", args: [String(data.text)] }).catch(() => {});
       return;
     }
     if (kind !== "req") return;
     const id = data.id;
     let decision = { browser: "show", reason: "keine Antwort" };
     try {
-      // The blob comes from the page; read it through the DOM API to get our own ArrayBuffer.
-      const bytes = await data.blob.arrayBuffer();
-      const res = await browser.runtime.sendMessage({
+      // The blob comes from the page; read it through the DOM API to get our own copy.
+      const payload = BINARY_MESSAGES ? { bytes: await data.blob.arrayBuffer() } : { base64: await blobToBase64(data.blob) };
+      const res = await ext.runtime.sendMessage({
         type: "pdf",
-        bytes,
+        ...payload,
         filename: String(data.filename || ""),
         pageUrl: location.href,
         method: String(data.method || "blob"),
@@ -44,21 +56,21 @@
   });
 
   // Notifications from the background script.
-  browser.runtime.onMessage.addListener((msg) => {
+  ext.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === "suppressedUrl") {
       toPage({ kind: "suppressUrl", url: msg.url });
-      return Promise.resolve(true);
+      sendResponse(true);
     }
-    return undefined;
+    return false;
   });
 
   function sendConfig(s) {
     toPage({ kind: "config", enabled: !!s.enabled, debug: !!s.debug });
   }
-  browser.runtime.sendMessage({ type: "getSettings" }).then(sendConfig, () => {});
-  browser.storage.onChanged.addListener((changes, area) => {
+  ext.runtime.sendMessage({ type: "getSettings" }).then(sendConfig, () => {});
+  ext.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && ("enabled" in changes || "debug" in changes)) {
-      browser.runtime.sendMessage({ type: "getSettings" }).then(sendConfig, () => {});
+      ext.runtime.sendMessage({ type: "getSettings" }).then(sendConfig, () => {});
     }
   });
 })();

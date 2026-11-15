@@ -5,13 +5,13 @@
 # Zwei Möglichkeiten für das Zertifikat – eine davon wählen:
 #
 # A) Caddy-eigene CA ("tls internal"), funktioniert ohne Internet und ohne eigene Domain.
-#    Firefox muss der Caddy-Root-CA einmalig vertrauen (siehe README, Abschnitt "Firefox vorbereiten").
+#    Der Browser (Firefox/Chrome) muss der Caddy-Root-CA einmalig vertrauen (siehe README, Abschnitt "Browser vorbereiten").
 #    Name/IP unten anpassen: so, wie die Erweiterung den Server aufruft.
 #
 # B) Echtes Let's-Encrypt-Zertifikat für eine eigene Domain (z.B. druck.meine-praxis.de),
 #    deren DNS-Eintrag auf die LAN-Adresse des Servers zeigt. Weil Let's Encrypt einen Rechner
 #    im LAN nicht erreichen kann, braucht es die DNS-Challenge mit einem Caddy-Build, der das
-#    Plugin des DNS-Anbieters enthält (https://caddyserver.com/download). Dann muss in Firefox
+#    Plugin des DNS-Anbieters enthält (https://caddyserver.com/download). Dann muss im Browser
 #    nichts importiert werden.
 
 # Gemeinsame Einstellungen (Snippet), wird unten von den Site-Blöcken importiert.

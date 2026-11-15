@@ -2,12 +2,15 @@
   "name": "remote-pdf-printer-extension",
   "version": "0.1.0",
   "private": true,
-  "description": "Firefox-Erweiterung: PDFs aus WebApp an den eigenen Druckserver senden",
+  "description": "Browser-Erweiterung (Firefox und Chrome): PDFs aus WebApp an den eigenen Druckserver senden",
   "scripts": {
-    "lint": "web-ext lint --ignore-files package.json package-lock.json",
-    "build": "web-ext build --overwrite-dest --ignore-files package.json package-lock.json",
-    "run": "web-ext run --start-url https://app.example.org --ignore-files package.json package-lock.json",
-    "sign": "web-ext sign --channel=unlisted --ignore-files package.json package-lock.json"
+    "lint": "web-ext lint --ignore-files package.json package-lock.json build.mjs \"dist/**\" \"test/**\"",
+    "build": "npm run build:firefox && npm run build:chrome",
+    "build:firefox": "web-ext build --overwrite-dest --artifacts-dir dist --ignore-files package.json package-lock.json build.mjs \"dist/**\" \"test/**\"",
+    "build:chrome": "node build.mjs",
+    "run": "web-ext run --start-url https://app.example.org --ignore-files package.json package-lock.json build.mjs \"dist/**\" \"test/**\"",
+    "sign": "web-ext sign --channel=unlisted --artifacts-dir dist --ignore-files package.json package-lock.json build.mjs \"dist/**\" \"test/**\"",
+    "test:chrome": "node test/chrome.test.mjs"
   },
   "devDependencies": {
     "web-ext": "^8.3.0"

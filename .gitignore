@@ -9,3 +9,4 @@ venv/
 # Schlüssel und lokale Konfiguration niemals einchecken
 *.key
 config.toml
+extension/dist/
