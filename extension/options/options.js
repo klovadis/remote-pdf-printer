@@ -99,6 +99,13 @@ $("form").addEventListener("submit", (event) => {
 
 $("test").addEventListener("click", async () => {
   const s = readForm();
+  try {
+    // Ask for access to the server right away (must happen in the click handler). Not awaited:
+    // the server also answers cross-origin requests from extensions, so the test works either way.
+    ext.permissions.request({ origins: [originPattern(s.serverUrl)] }).catch(() => {});
+  } catch {
+    return show("Ungültige Server-Adresse.", false);
+  }
   show("Teste …", true);
   const [text, ok] = describeHealth(await send({ type: "health", serverUrl: s.serverUrl, token: s.token }));
   show(text, ok);

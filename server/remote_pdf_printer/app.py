@@ -23,6 +23,10 @@ from .storage import build_filename, store_pdf
 log = logging.getLogger(__name__)
 
 DEDUPE_SECONDS = 20
+# Browser extensions may call the API cross-origin (e.g. Chrome before the host permission is
+# granted). Only extension origins are allowed; the API token is required regardless.
+EXTENSION_ORIGIN_PREFIXES = ("chrome-extension://", "moz-extension://", "safari-web-extension://")
+CORS_ALLOW_HEADERS = "Authorization, Content-Type, X-Filename, X-Source-Url, X-Capture-Method"
 
 
 @dataclass
@@ -143,9 +147,16 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # route http.server logging through logging
         log.debug("%s - %s", self.client_address[0], fmt % args)
 
+    def _cors_headers(self) -> None:
+        origin = self.headers.get("Origin", "")
+        if origin.startswith(EXTENSION_ORIGIN_PREFIXES):
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+
     def _json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
+        self._cors_headers()
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -179,6 +190,25 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     # --- routes ------------------------------------------------------------------
+    def do_OPTIONS(self):
+        """CORS preflight (carries no token, so it is answered without authentication)."""
+        path = urlsplit(self.path).path
+        if path not in ("/api/health", "/api/documents") or not self.headers.get("Origin", "").startswith(EXTENSION_ORIGIN_PREFIXES):
+            self.send_response(HTTPStatus.FORBIDDEN)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self._cors_headers()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS)
+        self.send_header("Access-Control-Max-Age", "600")
+        if self.headers.get("Access-Control-Request-Private-Network") == "true":
+            # Chrome "Private Network Access" for servers in the local network.
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if path != "/api/health":

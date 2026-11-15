@@ -402,7 +402,8 @@ if (CAN_FILTER_RESPONSES) {
   ext.downloads.onCreated.addListener(onDownloadCreatedFirefox);
 } else {
   ext.downloads.onCreated.addListener(onDownloadCreatedChrome);
-  ext.webRequest.onHeadersReceived.addListener(
+  // Only present when loaded from the shared source folder; the Chrome build omits webRequest.
+  ext.webRequest?.onHeadersReceived.addListener(
     onHeadersReceivedChrome,
     { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
     ["responseHeaders"]

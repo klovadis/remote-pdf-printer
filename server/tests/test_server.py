@@ -321,3 +321,32 @@ def test_unknown_printer_is_reported(monkeypatch, tmp_path):
     # correct name prints
     assert print_pdf(PrintingSettings(backend="cups", lp_command=str(lp)),
                      PrintSettings(printer="HP75B446 (HP Smart Tank 7300)"), make_pdf(105, 148), "x") == "ok"
+
+
+def _raw(url, method, headers):
+    req = urllib.request.Request(url, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, dict(resp.headers)
+    except urllib.error.HTTPError as exc:
+        return exc.code, dict(exc.headers)
+
+
+def test_cors_preflight_for_extensions(http_server):
+    status, h = _raw(http_server + "/api/health", "OPTIONS", {
+        "Origin": "chrome-extension://abcdef", "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization", "Access-Control-Request-Private-Network": "true"})
+    assert status == 204
+    assert h["Access-Control-Allow-Origin"] == "chrome-extension://abcdef"
+    assert "Authorization" in h["Access-Control-Allow-Headers"]
+    assert h["Access-Control-Allow-Private-Network"] == "true"
+    # websites are not allowed
+    status, h = _raw(http_server + "/api/documents", "OPTIONS", {"Origin": "https://evil.example", "Access-Control-Request-Method": "POST"})
+    assert status == 403 and "Access-Control-Allow-Origin" not in h
+
+
+def test_cors_header_on_responses(http_server):
+    status, h = _raw(http_server + "/api/health", "GET", {"Origin": "moz-extension://x", "Authorization": f"Bearer {TOKEN}"})
+    assert status == 200 and h["Access-Control-Allow-Origin"] == "moz-extension://x"
+    status, h = _raw(http_server + "/api/health", "GET", {"Origin": "https://evil.example", "Authorization": f"Bearer {TOKEN}"})
+    assert status == 200 and "Access-Control-Allow-Origin" not in h

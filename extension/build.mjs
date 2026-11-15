@@ -18,8 +18,9 @@ export function chromeManifest(firefox) {
   delete m.browser_specific_settings;
   m.minimum_chrome_version = "111"; // content_scripts "world": "MAIN"
   m.background = { service_worker: "background.js" }; // loads common/domains.js via importScripts
-  // Not available in Chrome MV3: no blocking webRequest, no response filtering.
-  m.permissions = m.permissions.filter((p) => !["webRequestBlocking", "webRequestFilterResponse"].includes(p));
+  // Chrome MV3 has no blocking webRequest and no response filtering. Plain webRequest would only feed a
+  // diagnostic hint and makes Chrome warn because host permissions are requested at runtime – drop it.
+  m.permissions = m.permissions.filter((p) => !["webRequest", "webRequestBlocking", "webRequestFilterResponse"].includes(p));
   m.icons = PNG_ICONS;
   m.action = { ...m.action, default_icon: { 16: PNG_ICONS[16], 32: PNG_ICONS[32], 48: PNG_ICONS[48] } };
   return m;

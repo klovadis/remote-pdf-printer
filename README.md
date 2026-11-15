@@ -270,6 +270,10 @@ Das Manifest enthält für den Hintergrunddienst beide Angaben: `scripts` für F
 für Chrome. Jeder Browser nutzt seine und ignoriert die andere. `npm run lint` meldet deshalb eine
 harmlose Warnung zu `service_worker`.
 
+Lädt man in Chrome den Ordner `extension` selbst, funktioniert die Erweiterung, Chrome zeigt aber
+Warnungen zu Firefox-eigenen Berechtigungen (z. B. „You need to request host permissions … webRequest API“).
+Ohne diese Warnungen ist die gebaute Version: `extension/dist/chrome` laden bzw. die ZIP-Datei entpacken.
+
 **Was Chrome nicht kann:** Firefox kann PDFs abfangen, die eine Web-Anwendung direkt vom Server in einem
 Tab oder Rahmen öffnet. Chrome bietet dafür keine Schnittstelle. Die Chrome-Version meldet solche Fälle nur im
 Protokoll („PDF wird direkt im Tab geöffnet …“). Viele Web-Anwendungen erzeugen PDFs aber im Browser und
@@ -338,6 +342,9 @@ API:
   `X-Filename` und `X-Source-Url` (URL-kodiert) sowie `X-Capture-Method`. Mit `?dry_run=1` wird nur
   klassifiziert. Die Antwort ist JSON mit `category`, `label`, `browser` (`show`/`suppress`), `stored`,
   `printed` und `errors`.
+- Anfragen von Browser-Erweiterungen (`chrome-extension://`, `moz-extension://`) beantwortet der Server
+  auch ursprungsübergreifend (CORS, inklusive `OPTIONS`-Vorabfrage). Webseiten dürfen das nicht, und das
+  Token ist in jedem Fall nötig.
 
 ## Datenschutz
 
