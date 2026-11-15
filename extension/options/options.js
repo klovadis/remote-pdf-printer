@@ -12,6 +12,22 @@ function show(text, ok) {
   status.className = "status " + (ok ? "ok" : "err");
 }
 
+// Never hang: if the background script does not answer, say so.
+async function send(msg) {
+  try {
+    const res = await ext.runtime.sendMessage(msg);
+    if (res === undefined) throw new Error("keine Antwort");
+    return res;
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        `Der Hintergrunddienst der Erweiterung antwortet nicht (${err.message}). ` +
+        "Erweiterung neu laden (Chrome: chrome://extensions, Firefox: about:debugging) und dort auf Fehler prüfen.",
+    };
+  }
+}
+
 function readForm() {
   return {
     serverUrl: $("serverUrl").value.trim().replace(/\/+$/, ""),
@@ -74,9 +90,9 @@ $("form").addEventListener("submit", (event) => {
     if (obsolete.length) await ext.permissions.remove({ origins: obsolete }).catch(() => {});
     await ext.storage.local.set(s);
     $("domains").value = s.domains.join("\n");
-    await ext.runtime.sendMessage({ type: "syncContentScripts" });
+    await send({ type: "syncContentScripts" });
     show("Gespeichert. Teste Verbindung …", true);
-    const [text, ok] = describeHealth(await ext.runtime.sendMessage({ type: "health" }));
+    const [text, ok] = describeHealth(await send({ type: "health" }));
     show(`Gespeichert. Aktiv auf: ${s.domains.join(", ")}\nBereits geöffnete Seiten bitte neu laden.\n${text}`, ok);
   });
 });
@@ -84,6 +100,6 @@ $("form").addEventListener("submit", (event) => {
 $("test").addEventListener("click", async () => {
   const s = readForm();
   show("Teste …", true);
-  const [text, ok] = describeHealth(await ext.runtime.sendMessage({ type: "health", serverUrl: s.serverUrl, token: s.token }));
+  const [text, ok] = describeHealth(await send({ type: "health", serverUrl: s.serverUrl, token: s.token }));
   show(text, ok);
 });

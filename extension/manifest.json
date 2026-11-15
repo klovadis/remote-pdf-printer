@@ -15,8 +15,10 @@
     }
   },
   "icons": {
-    "48": "icons/icon.svg",
-    "96": "icons/icon.svg"
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
   },
   "permissions": [
     "webRequest",
@@ -34,11 +36,16 @@
     "scripts": [
       "common/domains.js",
       "background.js"
-    ]
+    ],
+    "service_worker": "background.js"
   },
   "action": {
     "default_title": "Remote PDF Printer",
-    "default_icon": "icons/icon.svg",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    },
     "default_popup": "popup/popup.html"
   },
   "options_ui": {

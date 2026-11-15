@@ -163,6 +163,19 @@ try {
   }
   assert.deepEqual(registered.map((r) => r.matches).flat(), ["*://app.example.test/*", "*://app.example.test/*"]);
 
+  await check("Einstellungsseite: Verbindungstest erreicht den Server", async () => {
+    const id = new URL(worker.url()).host;
+    const opt = await context.newPage();
+    await opt.goto(`chrome-extension://${id}/options/options.html`);
+    await opt.fill("#serverUrl", printer.url);
+    await opt.fill("#token", TOKEN);
+    await opt.click("#test");
+    await opt.waitForFunction(() => !/^Teste/.test(document.getElementById("status").textContent), null, { timeout: 10000 });
+    const text = await opt.textContent("#status");
+    assert.match(text, /Verbunden mit Server .*Rezept \(A6\): druckt auf Rezeptdrucker/s, text);
+    await opt.close();
+  });
+
   const page = await context.newPage();
   page.on("console", (m) => consoleLines.push("[page] " + m.text()));
   await page.goto(webapp.origin + "/praxis");

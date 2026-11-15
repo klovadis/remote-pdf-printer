@@ -18,10 +18,13 @@ async function init() {
   $("server").textContent = s.serverUrl || "Kein Server eingerichtet";
 
   if (s.serverUrl) {
-    ext.runtime.sendMessage({ type: "health" }).then((res) => {
-      $("dot").className = "dot " + (res.ok ? "ok" : "err");
-      if (!res.ok) $("server").textContent = `${s.serverUrl}: ${res.error}`;
-    });
+    ext.runtime
+      .sendMessage({ type: "health" })
+      .catch((err) => ({ ok: false, error: `Hintergrunddienst antwortet nicht (${err.message})` }))
+      .then((res = { ok: false, error: "keine Antwort" }) => {
+        $("dot").className = "dot " + (res.ok ? "ok" : "err");
+        if (!res.ok) $("server").textContent = `${s.serverUrl}: ${res.error}`;
+      });
   }
 
   const { log = [] } = await ext.storage.session.get("log");

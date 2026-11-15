@@ -250,25 +250,25 @@ Für Updates `version` in `extension/manifest.json` erhöhen und erneut signiere
 
 ### Chrome (und andere Chromium-Browser wie Edge)
 
-Die Chrome-Version wird aus denselben Quellen gebaut (Node.js ≥ 22.2 nötig):
-
-```bash
-cd extension
-```
-
-```bash
-npm run build:chrome
-```
-
-Das erzeugt `extension/dist/chrome/` (entpackte Erweiterung) und
-`extension/dist/remote-pdf-printer-chrome-<version>.zip`.
-
 - **Direkt installieren:** `chrome://extensions` öffnen, oben rechts den *Entwicklermodus* einschalten,
-  *Entpackte Erweiterung laden* und den Ordner `extension/dist/chrome` wählen. Anders als in Firefox bleibt
-  die Erweiterung auch nach einem Neustart installiert. Den Ordner danach nicht löschen oder verschieben.
+  *Entpackte Erweiterung laden* und den Ordner `extension` aus dem Repository wählen. Er funktioniert in
+  Firefox und Chrome gleichermaßen. Anders als in Firefox bleibt die Erweiterung auch nach einem Neustart
+  installiert. Den Ordner danach nicht löschen oder verschieben.
 - **Über den Chrome Web Store:** Das geht ohne Entwicklermodus. Nötig ist ein Entwicklerkonto (einmalig
-  5 US-Dollar). Dort die ZIP-Datei hochladen und als Sichtbarkeit *„Nicht gelistet“* wählen. Google prüft
-  die Erweiterung vor der Freigabe.
+  5 US-Dollar). Das Paket dafür erzeugt (Node.js ≥ 22.2 nötig):
+  ```bash
+  cd extension
+  ```
+  ```bash
+  npm run build:chrome
+  ```
+  Das ergibt `extension/dist/remote-pdf-printer-chrome-<version>.zip` und `extension/dist/chrome/`, ohne
+  Firefox-spezifische Einträge. Die ZIP-Datei im Web Store hochladen und als Sichtbarkeit
+  *„Nicht gelistet“* wählen. Google prüft die Erweiterung vor der Freigabe.
+
+Das Manifest enthält für den Hintergrunddienst beide Angaben: `scripts` für Firefox und `service_worker`
+für Chrome. Jeder Browser nutzt seine und ignoriert die andere. `npm run lint` meldet deshalb eine
+harmlose Warnung zu `service_worker`.
 
 **Was Chrome nicht kann:** Firefox kann PDFs abfangen, die eine Web-Anwendung direkt vom Server in einem
 Tab oder Rahmen öffnet. Chrome bietet dafür keine Schnittstelle. Die Chrome-Version meldet solche Fälle nur im
