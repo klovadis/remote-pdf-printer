@@ -57,12 +57,12 @@ class Rule:
 
 @dataclass
 class ServerSettings:
-    host: str = "0.0.0.0"
-    port: int = 8443
-    tls_cert: str | None = None
-    tls_key: str | None = None
+    host: str = "127.0.0.1"
+    port: int = 8080
     api_tokens: list[str] = field(default_factory=list)
     allowed_clients: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = field(default_factory=list)
+    # Reverse proxies (e.g. Caddy) whose X-Forwarded-For header is trusted.
+    trusted_proxies: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = field(default_factory=list)
     max_upload_mb: float = 50.0
 
 
@@ -156,24 +156,24 @@ def parse_config(raw: dict, base_dir: Path | None = None) -> Config:
         raise ConfigError("server.api_token fehlt (mindestens ein Token ist Pflicht)")
     if any(len(t) < 16 for t in tokens):
         raise ConfigError("server.api_token muss mindestens 16 Zeichen lang sein")
-    try:
-        allowed = [ipaddress.ip_network(c, strict=False) for c in s.get("allowed_clients", [])]
-    except ValueError as exc:
-        raise ConfigError(f"server.allowed_clients: {exc}") from exc
+    if "tls_cert" in s or "tls_key" in s:
+        raise ConfigError(
+            "server.tls_cert/tls_key werden nicht mehr unterstützt: HTTPS übernimmt der Reverse Proxy (Caddy). "
+            "Bitte die beiden Zeilen entfernen."
+        )
 
-    def resolve(p):
-        if p is None:
-            return None
-        path = Path(p)
-        return str(path if path.is_absolute() else base_dir / path)
+    def networks(key, default=()):
+        try:
+            return [ipaddress.ip_network(c, strict=False) for c in s.get(key, default)]
+        except ValueError as exc:
+            raise ConfigError(f"server.{key}: {exc}") from exc
 
     server = ServerSettings(
-        host=s.get("host", "0.0.0.0"),
-        port=int(s.get("port", 8443)),
-        tls_cert=resolve(s.get("tls_cert")),
-        tls_key=resolve(s.get("tls_key")),
+        host=s.get("host", "127.0.0.1"),
+        port=int(s.get("port", 8080)),
         api_tokens=tokens,
-        allowed_clients=allowed,
+        allowed_clients=networks("allowed_clients"),
+        trusted_proxies=networks("trusted_proxies", ["127.0.0.1", "::1"]),
         max_upload_mb=float(s.get("max_upload_mb", 50)),
     )
 

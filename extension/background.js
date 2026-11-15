@@ -357,7 +357,7 @@ async function checkHealth(serverUrl, token) {
     const msg = err.name === "AbortError" ? "Zeitüberschreitung" : err.message;
     return {
       ok: false,
-      error: `${msg} – läuft der Server, ist die CA in Firefox importiert und die Berechtigung erteilt?`,
+      error: `${msg} – laufen Caddy und der Server, vertraut Firefox dem Zertifikat und ist die Berechtigung erteilt?`,
     };
   } finally {
     clearTimeout(timer);

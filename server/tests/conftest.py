@@ -49,7 +49,6 @@ def make_pdf(width_mm: float, height_mm: float, text: str = "", pages: int = 1) 
 def config(tmp_path):
     raw = EXAMPLE_CONFIG.read_text(encoding="utf-8")
     raw = raw.replace('dir = "/srv/remote-pdf"', f'dir = "{tmp_path / "docs"}"')
-    raw = raw.replace('tls_cert = "tls/server.crt"\n', "").replace('tls_key = "tls/server.key"\n', "")
     raw = raw.replace('lp_command = "lp"', f'lp_command = "{tmp_path / "fake-lp"}"')
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_text(raw, encoding="utf-8")

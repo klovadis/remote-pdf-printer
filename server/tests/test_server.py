@@ -6,7 +6,9 @@ import urllib.request
 import pytest
 from conftest import make_pdf
 
-from remote_pdf_printer.app import Processor, make_server
+import ipaddress
+
+from remote_pdf_printer.app import Processor, make_server, resolve_client_ip
 from remote_pdf_printer.classify import InvalidPdf, analyze_pdf, classify
 from remote_pdf_printer.config import ConfigError, parse_config
 from remote_pdf_printer.storage import build_filename, safe_name, store_pdf
@@ -69,6 +71,8 @@ def test_rule_order_and_text_none(config):
          "rules": [{"category": "x", "page_size": "B5"}]},
         {"server": {"api_token": TOKEN}, "classification": {"default_category": "x"}, "categories": {"x": {}},
          "rules": [{"category": "x", "txt_any": ["typo"]}]},
+        {"server": {"api_token": TOKEN, "tls_cert": "x.crt"}, "classification": {"default_category": "x"}, "categories": {"x": {}}},
+        {"server": {"api_token": TOKEN, "trusted_proxies": ["kein-netz"]}, "classification": {"default_category": "x"}, "categories": {"x": {}}},
     ],
 )
 def test_invalid_configs(raw):
@@ -183,3 +187,33 @@ def test_http_upload(http_server):
 def test_http_rejects_garbage(http_server):
     status, body = _req(http_server + "/api/documents", data=b"not a pdf")
     assert status == 422 and body["browser"] == "show"
+
+
+# --- reverse proxy ---------------------------------------------------------------------------
+
+LOOPBACK = [ipaddress.ip_network("127.0.0.1/32"), ipaddress.ip_network("::1/128")]
+
+
+@pytest.mark.parametrize(
+    "peer,xff,expected",
+    [
+        ("192.168.1.5", [], "192.168.1.5"),  # direct client
+        ("192.168.1.5", ["10.0.0.1"], "192.168.1.5"),  # untrusted peer: header ignored
+        ("127.0.0.1", ["192.168.1.5"], "192.168.1.5"),  # via Caddy
+        ("127.0.0.1", ["6.6.6.6, 192.168.1.5"], "192.168.1.5"),  # spoofed first hop is ignored
+        ("127.0.0.1", ["192.168.1.5, 127.0.0.1"], "192.168.1.5"),  # chained trusted proxies
+        ("127.0.0.1", [], "127.0.0.1"),
+        ("127.0.0.1", ["kaputt"], None),
+    ],
+)
+def test_resolve_client_ip(peer, xff, expected):
+    res = resolve_client_ip(peer, xff, LOOPBACK)
+    assert (str(res) if res else None) == expected
+
+
+def test_http_allowed_clients_behind_proxy(config, http_server):
+    config.server.allowed_clients = [ipaddress.ip_network("192.168.0.0/16")]
+    # Test client connects from 127.0.0.1 = trusted proxy, so X-Forwarded-For decides.
+    assert _req(http_server + "/api/health", headers={"X-Forwarded-For": "192.168.1.5"})[0] == 200
+    assert _req(http_server + "/api/health", headers={"X-Forwarded-For": "10.1.2.3"})[0] == 403
+    assert _req(http_server + "/api/health", headers={"X-Forwarded-For": "192.168.1.5, 10.1.2.3"})[0] == 403

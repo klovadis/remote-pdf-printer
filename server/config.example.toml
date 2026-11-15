@@ -3,16 +3,19 @@
 # Relative Pfade beziehen sich auf den Ordner dieser Datei.
 
 [server]
-host = "0.0.0.0"
-port = 8443
-# Zertifikat und Schlüssel, erzeugt mit scripts/make-certs.sh
-tls_cert = "tls/server.crt"
-tls_key = "tls/server.key"
+# Der Server spricht nur HTTP und lauscht lokal. HTTPS und Zertifikate übernimmt Caddy
+# (siehe deploy/Caddyfile), das Anfragen an diese Adresse weiterleitet.
+host = "127.0.0.1"
+port = 8080
 # Geheimes Token (mind. 16 Zeichen), muss auch in der Firefox-Erweiterung eingetragen werden.
 # Erzeugen z.B. mit:  python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 api_token = "BITTE-AENDERN-mindestens-16-zeichen"
-# Optional: nur diese Rechner/Netze dürfen PDFs schicken (leer = alle, Token ist trotzdem Pflicht)
+# Optional: nur diese Rechner/Netze dürfen PDFs schicken (leer = alle, Token ist trotzdem Pflicht).
+# Hinter Caddy wird dafür die echte Client-Adresse aus X-Forwarded-For verwendet.
 allowed_clients = ["192.168.0.0/16", "127.0.0.1"]
+# Reverse Proxies, deren X-Forwarded-For-Header vertraut wird. Läuft Caddy auf demselben Rechner,
+# passt der Standard. Läuft Caddy woanders, dessen IP-Adresse hier eintragen.
+trusted_proxies = ["127.0.0.1", "::1"]
 max_upload_mb = 50
 
 [storage]

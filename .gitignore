@@ -8,6 +8,4 @@ venv/
 .pytest_cache/
 # Schlüssel und lokale Konfiguration niemals einchecken
 *.key
-*.srl
 config.toml
-tls/

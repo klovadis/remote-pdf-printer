@@ -6,12 +6,12 @@ A4 auf dem A4-Drucker) und/oder **in Ordnern ablegen** (z. B. Rechnungen für ei
 Damit muss in Firefox kein Drucker mehr umgestellt werden.
 
 ```
-Firefox (WebApp)                          Druckserver (Linux im LAN)
-┌──────────────────────────┐   HTTPS +     ┌────────────────────────────────────┐
-│ Erweiterung fängt PDF ab │── Token ────▶ │ erkennt Typ (Format, Text, Name)   │
-│ wartet auf Entscheidung  │◀── JSON ───── │ legt ab: /srv/remote-pdf/<typ>/  │
-│ show → wie bisher        │               │ druckt:  lp -d <Drucker> -o …      │
-│ suppress → ausblenden    │               └────────────────────────────────────┘
+Firefox (WebApp)                         Druckserver (Linux im LAN)
+┌──────────────────────────┐  HTTPS +   ┌───────┐ HTTP  ┌────────────────────────────────────┐
+│ Erweiterung fängt PDF ab │── Token ──▶│ Caddy │──────▶│ erkennt Typ (Format, Text, Name)   │
+│ wartet auf Entscheidung  │◀── JSON ───│ (TLS) │◀──────│ legt ab: /srv/remote-pdf/<typ>/  │
+│ show → wie bisher        │            └───────┘ :8080 │ druckt:  lp -d <Drucker> -o …      │
+│ suppress → ausblenden    │                            └────────────────────────────────────┘
 └──────────────────────────┘
 ```
 
@@ -39,22 +39,23 @@ Die mitgelieferte Beispielkonfiguration enthält vier Dokumenttypen:
 
 ## 1. Server einrichten (Debian/Ubuntu/Raspberry Pi OS)
 
-Voraussetzungen: Python ≥ 3.11, CUPS mit eingerichteten Druckern (`lpstat -p` zeigt die Namen).
+Voraussetzungen: Python ≥ 3.11, CUPS mit eingerichteten Druckern (`lpstat -p` zeigt die Namen) und
+[Caddy](https://caddyserver.com) als Reverse Proxy. Der Druckserver selbst spricht nur HTTP auf
+`127.0.0.1:8080`. HTTPS und Zertifikate übernimmt Caddy (siehe Abschnitt 2).
 
 ```bash
-sudo apt install python3-venv cups-client openssl
+sudo apt install python3-venv cups-client caddy
 sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin remote-pdf
 sudo git clone https://github.com/klovadis/remote-pdf-printer /opt/remote-pdf-printer
 sudo python3 -m venv /opt/remote-pdf-printer/venv
 sudo /opt/remote-pdf-printer/venv/bin/pip install /opt/remote-pdf-printer/server
 ```
 
-Konfiguration und Zertifikate (IP-Adresse/Hostname des Servers angeben):
+Konfiguration:
 
 ```bash
 sudo mkdir -p /etc/remote-pdf-printer /srv/remote-pdf
 sudo cp /opt/remote-pdf-printer/server/config.example.toml /etc/remote-pdf-printer/config.toml
-sudo /opt/remote-pdf-printer/scripts/make-certs.sh /etc/remote-pdf-printer/tls 192.168.1.20 druckserver.local
 sudo chown -R remote-pdf: /etc/remote-pdf-printer /srv/remote-pdf
 sudo chmod 600 /etc/remote-pdf-printer/config.toml
 ```
@@ -62,7 +63,11 @@ sudo chmod 600 /etc/remote-pdf-printer/config.toml
 In `/etc/remote-pdf-printer/config.toml` anpassen:
 
 - `api_token`: neues Geheimnis erzeugen mit `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
-- `allowed_clients`: Netz bzw. IP des Praxis-PCs
+- `allowed_clients`: Netz bzw. IP des Praxis-PCs. Hinter Caddy wird dafür die echte Adresse aus dem
+  Header `X-Forwarded-For` genommen, aber nur, wenn die Anfrage von einem Proxy aus `trusted_proxies` kommt.
+  Läuft Caddy auf demselben Rechner, passt der Standard (`127.0.0.1`).
+- `host`/`port`: Standard ist `127.0.0.1:8080`, also nur lokal für Caddy erreichbar. Läuft Caddy auf einem
+  anderen Rechner, `host` auf die LAN-Adresse setzen und Caddys Adresse bei `trusted_proxies` eintragen.
 - Druckernamen (`printer = …`) und Optionen (verfügbare Optionen: `lpoptions -p DRUCKER -l`)
 
 Prüfen und Regeln mit echten PDFs testen. Dabei wird nichts gedruckt oder abgelegt:
@@ -91,20 +96,47 @@ Die abgelegten Dateien heißen standardmäßig `2026-11-15_14-03-22_rechnung_<Or
 zuerst als versteckte Datei geschrieben und dann umbenannt. Programme, die den Ordner überwachen,
 sehen also nie halb geschriebene PDFs.
 
-## 2. Firefox vorbereiten
+## 2. Caddy einrichten
 
-1. **CA-Zertifikat importieren**, damit Firefox dem Server vertraut: Datei `ca.crt` (aus dem Ordner
-   `/etc/remote-pdf-printer/tls`) auf den Praxis-PC kopieren, dann *Einstellungen → Datenschutz &
-   Sicherheit → Zertifikate anzeigen → Zertifizierungsstellen → Importieren* und *„Dieser CA vertrauen,
-   um Websites zu identifizieren“* anhaken. **Nicht** `ca.key` kopieren.
+Die Vorlage [`deploy/Caddyfile`](deploy/Caddyfile) nach `/etc/caddy/Caddyfile` kopieren oder per `import`
+in eine bestehende Caddy-Konfiguration einbinden. Hostname bzw. IP-Adresse anpassen, unter der die
+Erweiterung den Server aufrufen soll. Danach:
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+```
+
+```bash
+sudo systemctl reload caddy
+```
+
+Für das Zertifikat gibt es zwei Varianten, beide sind in der Vorlage beschrieben:
+
+- **A – Caddys interne CA (`tls internal`):** Das funktioniert ohne eigene Domain und ohne Internetzugang
+  des Servers. Firefox muss Caddys Root-Zertifikat einmalig vertrauen (siehe Abschnitt 3). Caddy erneuert
+  die Server-Zertifikate selbstständig.
+- **B – Let's Encrypt für eine eigene Domain** (z. B. `druck.meine-praxis.de`, DNS-Eintrag zeigt auf die
+  LAN-Adresse): Let's Encrypt kann einen Rechner im LAN nicht erreichen. Dafür braucht es die DNS-Challenge
+  und einen Caddy-Build mit dem Plugin des DNS-Anbieters. In Firefox ist dann nichts zu importieren.
+
+Die Vorlage lässt zusätzlich zum Token nur private Netze zu und begrenzt Uploads auf 50 MB.
+
+## 3. Firefox vorbereiten
+
+1. **Nur bei Variante A: Caddys Root-Zertifikat importieren.** Es liegt auf dem Server unter
+   `/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`. Diese Datei auf den Praxis-PC kopieren,
+   dann *Einstellungen → Datenschutz & Sicherheit → Zertifikate anzeigen → Zertifizierungsstellen →
+   Importieren* und *„Dieser CA vertrauen, um Websites zu identifizieren“* anhaken. **Nicht** die Datei
+   `root.key` kopieren. Zum Prüfen `https://druckserver.local/api/health` in Firefox öffnen: Es darf keine
+   Zertifikatswarnung erscheinen, die Antwort ist `{"error": "invalid token"}`.
 2. Erweiterung installieren (siehe unten), in den Einstellungen der Erweiterung Server-Adresse
-   (z. B. `https://192.168.1.20:8443`) und Token eintragen, **Speichern** und die angefragte Berechtigung
+   (z. B. `https://druckserver.local`) und Token eintragen, **Speichern** und die angefragte Berechtigung
    erlauben. Unter dem Formular sollte dann „Verbunden mit Server …“ und die Liste der Kategorien stehen.
 
 Über das Symbol in der Symbolleiste lässt sich die Erweiterung ein- und ausschalten. Dort sieht man
 auch die zuletzt verarbeiteten Dokumente.
 
-## 3. Erweiterung signieren und installieren
+## 4. Erweiterung signieren und installieren
 
 Normales Firefox installiert nur von Mozilla signierte Erweiterungen. Die Signierung als „unlisted“
 ist kostenlos, und die Erweiterung erscheint dabei nicht öffentlich auf addons.mozilla.org.
@@ -166,10 +198,10 @@ cd server && python3 -m venv .venv && .venv/bin/pip install -e '.[test]'
 cd server && .venv/bin/pytest
 ```
 
-Server lokal ohne TLS starten (nur zum Testen):
+Server lokal starten (ohne Caddy, nur zum Testen):
 
 ```bash
-cd server && .venv/bin/remote-pdf-printer -c config.toml --insecure
+cd server && .venv/bin/remote-pdf-printer -c config.toml
 ```
 
 API:
@@ -183,6 +215,6 @@ API:
 ## Datenschutz
 
 Die PDFs enthalten Patientendaten. Sie verlassen den Praxis-PC nur in Richtung des eingetragenen
-eigenen Servers und werden dabei per TLS verschlüsselt und per Token authentifiziert. Der Server
+eigenen Servers und werden dabei per TLS (Caddy) verschlüsselt und per Token authentifiziert. Der Server
 protokolliert Dateiname, Format und Kategorie, aber keine Dokumentinhalte. Der Ablageordner sollte
 entsprechend geschützt und gesichert werden.

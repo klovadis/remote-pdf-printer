@@ -7,7 +7,6 @@ import hmac
 import ipaddress
 import json
 import logging
-import ssl
 import threading
 import time
 from dataclasses import dataclass, field
@@ -108,6 +107,34 @@ class Processor:
         return result
 
 
+def _parse_ip(value: str):
+    try:
+        return ipaddress.ip_address(value.strip().strip("[]"))
+    except ValueError:
+        return None
+
+
+def resolve_client_ip(peer: str, forwarded_for: list[str], trusted_proxies) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """Return the client address.
+
+    Only if the direct peer is a trusted proxy, X-Forwarded-For is evaluated from right to left,
+    skipping further trusted proxies. A client cannot spoof its address this way, because Caddy
+    appends the real peer address to the header.
+    """
+    addr = _parse_ip(peer)
+    if addr is None or not any(addr in net for net in trusted_proxies):
+        return addr
+    hops = [h for line in forwarded_for for h in line.split(",") if h.strip()]
+    for hop in reversed(hops):
+        hop_addr = _parse_ip(hop)
+        if hop_addr is None:
+            return None  # malformed header: refuse rather than guess
+        addr = hop_addr
+        if not any(addr in net for net in trusted_proxies):
+            break
+    return addr
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"remote-pdf-printer/{__version__}"
     processor: Processor  # set via subclass in make_server
@@ -125,15 +152,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def client_ip(self):
+        """The real client address, taking X-Forwarded-For from trusted proxies (Caddy) into account."""
+        return resolve_client_ip(
+            self.client_address[0], self.headers.get_all("X-Forwarded-For") or [],
+            self.processor.config.server.trusted_proxies,
+        )
+
     def _authorized(self) -> bool:
         cfg = self.processor.config.server
+        addr = self.client_ip()
         if cfg.allowed_clients:
-            try:
-                addr = ipaddress.ip_address(self.client_address[0])
-            except ValueError:
-                addr = None
             if addr is None or not any(addr in net for net in cfg.allowed_clients):
-                log.warning("Anfrage von nicht erlaubter Adresse %s abgelehnt", self.client_address[0])
+                log.warning("Anfrage von nicht erlaubter Adresse %s abgelehnt", addr)
                 self._json(HTTPStatus.FORBIDDEN, {"error": "client not allowed"})
                 return False
         auth = self.headers.get("Authorization", "")
@@ -142,7 +173,7 @@ class Handler(BaseHTTPRequestHandler):
         for t in cfg.api_tokens:
             ok |= hmac.compare_digest(token.encode(), t.encode())
         if not ok:
-            log.warning("Anfrage mit ungültigem Token von %s abgelehnt", self.client_address[0])
+            log.warning("Anfrage mit ungültigem Token von %s abgelehnt", addr)
             self._json(HTTPStatus.UNAUTHORIZED, {"error": "invalid token"})
             return False
         return True
@@ -200,10 +231,4 @@ def make_server(config: Config) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (Handler,), {"processor": processor})
     httpd = ThreadingHTTPServer((config.server.host, config.server.port), handler)
     httpd.daemon_threads = True
-    if config.server.tls_cert:
-        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-        ctx.load_cert_chain(config.server.tls_cert, config.server.tls_key)
-        # Handshake lazily in the worker thread so a stalled client cannot block accept().
-        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True, do_handshake_on_connect=False)
     return httpd

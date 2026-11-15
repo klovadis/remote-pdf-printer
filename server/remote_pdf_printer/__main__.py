@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import logging
 import sys
 from pathlib import Path
@@ -15,6 +16,13 @@ from pathlib import Path
 from . import __version__
 from .classify import InvalidPdf, analyze_pdf, classify
 from .config import ConfigError, load_config
+
+
+def _is_loopback(host: str) -> bool:
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
 
 
 def _cmd_check(cfg) -> int:
@@ -27,8 +35,9 @@ def _cmd_check(cfg) -> int:
             actions.append(f"drucken auf {c.print.printer} {c.print.options}")
         print(f"  {c.name:<12} {c.label:<28} Browser: {c.browser:<9} {', '.join(actions) or 'keine Aktion'}")
     print(f"  Standardkategorie: {cfg.default_category}, {len(cfg.rules)} Regel(n)")
-    if not cfg.server.tls_cert:
-        print("WARNUNG: kein TLS-Zertifikat konfiguriert – der Server startet nur mit --insecure.")
+    print(f"  Lauscht auf http://{cfg.server.host}:{cfg.server.port} (HTTPS übernimmt der Reverse Proxy)")
+    if not _is_loopback(cfg.server.host):
+        print("WARNUNG: server.host ist nicht 127.0.0.1 – der Server ist dann auch unverschlüsselt erreichbar.")
     return 0
 
 
@@ -51,7 +60,6 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="remote-pdf-printer", description="PDF-Druckserver für die WebApp-Firefox-Erweiterung")
     ap.add_argument("-c", "--config", default="/etc/remote-pdf-printer/config.toml", help="Pfad zur config.toml")
     ap.add_argument("-v", "--verbose", action="store_true", help="ausführliches Logging")
-    ap.add_argument("--insecure", action="store_true", help="ohne TLS starten (nur zum Testen!)")
     ap.add_argument("--version", action="version", version=__version__)
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("serve", help="Server starten (Standard)")
@@ -75,15 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "classify":
         return _cmd_classify(cfg, args.files)
 
-    if not cfg.server.tls_cert and not args.insecure:
-        print("Kein TLS-Zertifikat konfiguriert (server.tls_cert). Zum Testen mit --insecure starten.", file=sys.stderr)
-        return 2
+    log = logging.getLogger(__name__)
+    if not _is_loopback(cfg.server.host):
+        log.warning("server.host=%s: der Server ist ohne Reverse Proxy unverschlüsselt im Netz erreichbar", cfg.server.host)
 
     from .app import make_server
 
     httpd = make_server(cfg)
-    scheme = "https" if cfg.server.tls_cert else "http"
-    logging.getLogger(__name__).info("Lausche auf %s://%s:%d", scheme, cfg.server.host, cfg.server.port)
+    log.info("Lausche auf http://%s:%d", cfg.server.host, cfg.server.port)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
