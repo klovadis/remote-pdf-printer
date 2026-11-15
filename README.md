@@ -237,10 +237,25 @@ ist kostenlos, und die Erweiterung erscheint dabei nicht öffentlich auf addons.
    ```bash
    npm run lint
    ```
-   ```bash
-   npx web-ext sign --channel=unlisted --api-key=USER:… --api-secret=…
+   Die Zugangsdaten als Umgebungsvariablen setzen (gelten nur im aktuellen Fenster), dann signieren.
+   PowerShell:
+   ```powershell
+   $env:WEB_EXT_API_KEY = "user:12345:678"
    ```
-   Die signierte `.xpi` liegt danach in `extension/dist/`.
+   ```powershell
+   $env:WEB_EXT_API_SECRET = "…"
+   ```
+   Linux/macOS:
+   ```bash
+   export WEB_EXT_API_KEY="user:12345:678" WEB_EXT_API_SECRET="…"
+   ```
+   Danach:
+   ```bash
+   npm run sign
+   ```
+   Die signierte `.xpi` liegt danach in `extension/dist/`. Die Schlüssel als Parameter anzuhängen
+   (`npm run sign -- --api-key=…`) klappt in der PowerShell nicht: Sie entfernt das `--`, und npm verschluckt
+   die Parameter („Missing required arguments: api-key, api-secret“).
 3. In Firefox: *Add-ons verwalten → Zahnrad → Add-on aus Datei installieren…* und die `.xpi` wählen.
 
 Für Updates `version` in `extension/manifest.json` erhöhen und erneut signieren.
