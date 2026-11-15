@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "remote-pdf-printer"
 version = "0.1.0"
-description = "Nimmt PDFs der Firefox-Erweiterung entgegen, klassifiziert sie, legt sie ab und druckt sie per CUPS."
+description = "Nimmt PDFs der Browser-Erweiterung entgegen, klassifiziert sie, legt sie ab und druckt sie (CUPS oder SumatraPDF)."
 requires-python = ">=3.11"
 dependencies = ["pypdf>=3.9"]
 

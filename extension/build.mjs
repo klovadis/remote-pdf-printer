@@ -10,14 +10,14 @@ import { fileURLToPath } from "node:url";
 import { crc32, deflateRawSync } from "node:zlib";
 
 const root = dirname(fileURLToPath(import.meta.url));
-const SHARED = ["background.js", "content", "options", "popup", "ui.css", "icons"];
+const SHARED = ["background.js", "common", "content", "options", "popup", "ui.css", "icons"];
 const PNG_ICONS = { 16: "icons/icon-16.png", 32: "icons/icon-32.png", 48: "icons/icon-48.png", 128: "icons/icon-128.png" };
 
 export function chromeManifest(firefox) {
   const m = structuredClone(firefox);
   delete m.browser_specific_settings;
   m.minimum_chrome_version = "111"; // content_scripts "world": "MAIN"
-  m.background = { service_worker: "background.js" };
+  m.background = { service_worker: "background.js" }; // loads common/domains.js via importScripts
   // Not available in Chrome MV3: no blocking webRequest, no response filtering.
   m.permissions = m.permissions.filter((p) => !["webRequestBlocking", "webRequestFilterResponse"].includes(p));
   m.icons = PNG_ICONS;

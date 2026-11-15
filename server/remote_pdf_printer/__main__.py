@@ -107,7 +107,7 @@ def _cmd_classify(cfg, files: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="remote-pdf-printer", description="PDF-Druckserver für die WebApp-Firefox-Erweiterung")
+    ap = argparse.ArgumentParser(prog="remote-pdf-printer", description="PDF-Druckserver für die Browser-Erweiterung Remote PDF Printer")
     ap.add_argument("-c", "--config", default=DEFAULT_CONFIG, help=f"Pfad zur config.toml (Standard: {DEFAULT_CONFIG})")
     ap.add_argument("-v", "--verbose", action="store_true", help="ausführliches Logging")
     ap.add_argument("--log-file", help="in diese Datei protokollieren statt auf die Konsole (z.B. unter Windows mit pythonw)")

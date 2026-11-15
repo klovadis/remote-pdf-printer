@@ -1,6 +1,6 @@
 /* Remote PDF Printer – hooks in the page context ("MAIN" world).
  *
- * WebApp may create PDFs in the browser (Blob / data: URLs) and then open them in a new
+ * Web applications may create PDFs in the browser (Blob / data: URLs) and then open them in a new
  * tab, load them into a (hidden) iframe and call print(), or trigger a download via <a>.
  * These hooks hold such a use until the print server has decided:
  *   show     -> the original action is performed (slightly delayed)
@@ -20,7 +20,7 @@
   function log(...args) {
     if (!debug) return;
     const text = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-    console.debug("[PDF-Drucker]", text);
+    console.debug("[Remote PDF Printer]", text);
     window.postMessage({ [TAG]: "log", text }, "*");
   }
 
@@ -118,7 +118,7 @@
         tracked.set(url, entry);
         if (PDF_TYPES.test(obj.type)) {
           log("PDF-Blob erzeugt", url, obj.size);
-          // Helps finding new WebApp mechanisms: report blobs that none of our hooks saw.
+          // Helps finding new mechanisms of the web application: report blobs that none of our hooks saw.
           setTimeout(() => {
             if (!entry.used) log("PDF-Blob wurde nicht über einen bekannten Weg verwendet", url);
           }, 5000);

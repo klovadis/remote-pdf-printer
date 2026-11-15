@@ -49,7 +49,7 @@
         reason: String((res && res.reason) || ""),
       };
     } catch (err) {
-      console.warn("[PDF-Drucker]", err);
+      console.warn("[Remote PDF Printer]", err);
       decision = { browser: "show", reason: `Hintergrundskript nicht erreichbar: ${err}` };
     }
     toPage({ kind: "res", id, decision });

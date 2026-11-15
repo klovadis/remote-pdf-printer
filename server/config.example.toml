@@ -10,7 +10,7 @@
 # (siehe deploy/Caddyfile), das Anfragen an diese Adresse weiterleitet.
 host = "127.0.0.1"
 port = 8080
-# Geheimes Token (mind. 16 Zeichen), muss auch in der Firefox-Erweiterung eingetragen werden.
+# Geheimes Token (mind. 16 Zeichen), muss auch in der Browser-Erweiterung eingetragen werden.
 # Erzeugen z.B. mit:  python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 api_token = "BITTE-AENDERN-mindestens-16-zeichen"
 # Optional: nur diese Rechner/Netze dürfen PDFs schicken (leer = alle, Token ist trotzdem Pflicht).
@@ -100,7 +100,7 @@ duplex = "none"
 #   text_all   = ["Regex", ...]   alle müssen vorkommen
 #   text_none  = ["Regex", ...]   keiner darf vorkommen
 #   filename   = "Regex"          auf den ursprünglichen Dateinamen
-#   url        = "Regex"          auf die Quell-URL in WebApp
+#   url        = "Regex"          auf die URL der Seite, aus der das PDF stammt
 #   min_pages / max_pages
 # Groß-/Kleinschreibung wird ignoriert. Testen ohne zu drucken:
 #   remote-pdf-printer -c config.toml classify beispiel.pdf

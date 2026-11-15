@@ -14,6 +14,9 @@
     <label>API-Token (wie <code>api_token</code> in der config.toml)
       <input id="token" type="password" autocomplete="off" required minlength="16">
     </label>
+    <label>Aktiv auf diesen Websites (eine Domain pro Zeile, <code>*.example.org</code> für alle Subdomains)
+      <textarea id="domains" rows="4" spellcheck="false" placeholder="app.example.org"></textarea>
+    </label>
     <label class="check"><input id="enabled" type="checkbox"> PDFs abfangen und an den Server senden</label>
     <label>Benachrichtigungen
       <select id="notify">
@@ -23,16 +26,17 @@
       </select>
     </label>
     <label class="check"><input id="captureForeign" type="checkbox">
-      Auch PDFs abfangen, die WebApp von anderen Domains lädt (erfordert Zugriff auf alle Websites)</label>
+      Auch PDFs abfangen, die diese Websites von anderen Domains laden (erfordert Zugriff auf alle Websites)</label>
     <label class="check"><input id="debug" type="checkbox">
       Debug-Modus (ausführliche Meldungen – Firefox: Browser-Konsole, Strg+Umschalt+J;
-      Chrome: F12 auf der WebApp-Seite und „Service Worker“ unter chrome://extensions)</label>
+      Chrome: F12 auf der jeweiligen Seite und „Service Worker“ unter chrome://extensions)</label>
     <div class="buttons">
       <button type="submit">Speichern</button>
       <button type="button" id="test">Verbindung testen</button>
     </div>
   </form>
   <pre id="status" class="status" hidden></pre>
+  <script src="../common/domains.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

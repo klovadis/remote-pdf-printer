@@ -2,7 +2,7 @@
 
 const ext = globalThis.browser ?? globalThis.chrome;
 
-const DEFAULTS = { serverUrl: "", token: "", enabled: true, notify: "all", debug: false, captureForeign: false };
+const DEFAULTS = { serverUrl: "", token: "", domains: [], enabled: true, notify: "all", debug: false, captureForeign: false };
 const $ = (id) => document.getElementById(id);
 const status = $("status");
 
@@ -20,6 +20,7 @@ function readForm() {
     notify: $("notify").value,
     debug: $("debug").checked,
     captureForeign: $("captureForeign").checked,
+    domainsText: $("domains").value,
   };
 }
 
@@ -31,7 +32,7 @@ function originPattern(url) {
 function describeHealth(res) {
   if (!res.ok) return [`Fehler: ${res.error}`, false];
   const lines = res.categories.map((c) => {
-    const actions = [c.printer && `druckt auf ${c.printer}`, c.stores && "legt ab", c.browser === "suppress" ? "Firefox: ausblenden" : "Firefox: anzeigen"];
+    const actions = [c.printer && `druckt auf ${c.printer}`, c.stores && "legt ab", c.browser === "suppress" ? "Browser: ausblenden" : "Browser: anzeigen"];
     return `  • ${c.label}: ${actions.filter(Boolean).join(", ")}`;
   });
   return [`Verbunden mit Server ${res.version}. Kategorien:\n${lines.join("\n")}`, true];
@@ -40,30 +41,43 @@ function describeHealth(res) {
 ext.storage.local.get(DEFAULTS).then((s) => {
   for (const [k, v] of Object.entries(s)) {
     const el = $(k);
-    if (el.type === "checkbox") el.checked = v;
+    if (k === "domains") el.value = v.join("\n");
+    else if (el.type === "checkbox") el.checked = v;
     else el.value = v;
   }
 });
 
 $("form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const s = readForm();
-  let origins;
+  const { domainsText, ...s } = readForm();
+  let serverOrigin;
   try {
     if (!/^https?:$/.test(new URL(s.serverUrl).protocol)) throw new Error();
-    origins = [originPattern(s.serverUrl)];
+    serverOrigin = originPattern(s.serverUrl);
   } catch {
     return show("Ungültige Server-Adresse.", false);
   }
+  const { domains, errors } = parseDomainList(domainsText);
+  if (errors.length) return show(errors.join("\n"), false);
+  if (!domains.length) return show("Bitte mindestens eine Website (Domain) eintragen, auf der die Erweiterung aktiv sein soll.", false);
+  s.domains = domains.map((d) => (d.wildcard ? "*." : "") + d.host);
+  const origins = [serverOrigin, ...domains.map((d) => d.pattern)];
   if (s.captureForeign) origins.push("<all_urls>");
-  // permissions.request must be called directly in the click handler.
+
+  // permissions.request must be called directly in the click handler (before any await).
   ext.permissions.request({ origins }).then(async (granted) => {
-    if (!granted) return show("Ohne Berechtigung für die Server-Adresse kann die Erweiterung nichts senden.", false);
-    if (!s.captureForeign) await ext.permissions.remove({ origins: ["<all_urls>"] }).catch(() => {});
+    if (!granted) return show("Ohne diese Berechtigungen kann die Erweiterung nicht arbeiten. Bitte erneut speichern und erlauben.", false);
+    // Give up permissions that are no longer needed.
+    const keep = new Set(origins);
+    const { origins: current = [] } = await ext.permissions.getAll();
+    const obsolete = current.filter((o) => !keep.has(o));
+    if (obsolete.length) await ext.permissions.remove({ origins: obsolete }).catch(() => {});
     await ext.storage.local.set(s);
+    $("domains").value = s.domains.join("\n");
+    await ext.runtime.sendMessage({ type: "syncContentScripts" });
     show("Gespeichert. Teste Verbindung …", true);
     const [text, ok] = describeHealth(await ext.runtime.sendMessage({ type: "health" }));
-    show("Gespeichert.\n" + text, ok);
+    show(`Gespeichert. Aktiv auf: ${s.domains.join(", ")}\nBereits geöffnete Seiten bitte neu laden.\n${text}`, ok);
   });
 });
 

@@ -2,7 +2,7 @@
  * Firefox: MV3 event page. Chrome: MV3 service worker. Same file for both.
  *
  * Capture paths that end up in sendPdf():
- *  1. PDF blobs / data: URLs created inside the WebApp page, reported by content/bridge.js (both browsers).
+ *  1. PDF blobs / data: URLs created inside a configured web page, reported by content/bridge.js (both browsers).
  *  2. Firefox: HTTP responses that are PDFs (new tab, iframe, download) via webRequest.filterResponseData.
  *     Chrome:  PDF downloads via the downloads API (paused, re-fetched, then resumed or cancelled).
  *     Chrome cannot intercept PDFs opened directly in a tab/frame; these are only logged.
@@ -14,9 +14,11 @@ const ext = globalThis.browser ?? globalThis.chrome;
 // Firefox only: read and hold back HTTP responses.
 const CAN_FILTER_RESPONSES = typeof ext.webRequest?.filterResponseData === "function";
 
-const WEBAPP_PATTERNS = ["*://*.example.de/*", "*://*.example.com/*", "*://*.example.net/*"];
-const WEBAPP_HOST = /(^|\.)example\.(de|com|net)$/i;
+// Chrome service worker: load the shared helper (Firefox lists it in manifest background.scripts).
+if (typeof importScripts === "function" && typeof parseDomainList === "undefined") importScripts("common/domains.js");
+
 const DEFAULTS = {
+  domains: [], // hosts on which the extension is active, see common/domains.js
   serverUrl: "",
   token: "",
   enabled: true,
@@ -29,20 +31,27 @@ const REQUEST_TIMEOUT_MS = 30000;
 const LOG_SIZE = 30;
 
 let settings = null;
-const settingsReady = ext.storage.local.get(DEFAULTS).then((s) => (settings = s));
+let activeDomains = [];
+const settingsReady = ext.storage.local.get(DEFAULTS).then((s) => {
+  settings = s;
+  activeDomains = parseDomainList(s.domains).domains;
+});
 ext.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !settings) return;
   for (const [k, { newValue }] of Object.entries(changes)) settings[k] = newValue ?? DEFAULTS[k];
-  if ("captureForeign" in changes) registerForeignListener();
+  if ("domains" in changes) {
+    activeDomains = parseDomainList(settings.domains).domains;
+    syncContentScripts();
+  }
 });
 
 function debug(...args) {
-  if (settings?.debug) console.log("[PDF-Drucker]", ...args);
+  if (settings?.debug) console.log("[Remote PDF Printer]", ...args);
 }
 
 // Problems are always logged (also without debug mode), visible in the browser console (Ctrl+Shift+J).
 function warn(...args) {
-  console.warn("[PDF-Drucker]", ...args);
+  console.warn("[Remote PDF Printer]", ...args);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -159,7 +168,7 @@ function notify(kind, title, message) {
   ext.notifications.create({
     type: "basic",
     iconUrl: ext.runtime.getURL("icons/icon-128.png"),
-    title: "PDF-Drucker: " + title,
+    title: "Remote PDF Printer: " + title,
     message,
   });
 }
@@ -220,8 +229,8 @@ function hostOf(url) {
   }
 }
 
-function anyFromWebApp(...urls) {
-  return urls.some((u) => u && WEBAPP_HOST.test(hostOf(u)));
+function anyConfigured(...urls) {
+  return urls.some((u) => u && urlMatchesDomains(u, activeDomains));
 }
 
 const RESOURCE_TYPES = ["main_frame", "sub_frame", "object"];
@@ -236,7 +245,8 @@ async function onHeadersReceived(details) {
   await settingsReady;
   if (!settings.enabled || details.tabId < 0) return {};
   if (details.statusCode < 200 || details.statusCode >= 300) return {};
-  if (!anyFromWebApp(details.url, details.documentUrl, details.originUrl)) return {};
+  // Requests to other hosts are only visible at all if "<all_urls>" was granted (option captureForeign).
+  if (!anyConfigured(details.url, details.documentUrl, details.originUrl)) return {};
   const cd = header(details, "content-disposition");
   const filename = filenameFromDisposition(cd) || filenameFromUrl(details.url);
   if (!isPdfContentType(header(details, "content-type"), filename)) return {};
@@ -327,27 +337,6 @@ async function onDownloadCreatedFirefox(item) {
   await removeDownload(item);
 }
 
-// Optional: PDFs that WebApp loads from other hosts (e.g. cloud storage), needs <all_urls>.
-function onForeignHeadersReceived(details) {
-  if (WEBAPP_HOST.test(hostOf(details.url))) return {}; // handled by the main listener
-  return onHeadersReceived(details);
-}
-
-async function registerForeignListener() {
-  if (!CAN_FILTER_RESPONSES) return;
-  await settingsReady;
-  ext.webRequest.onHeadersReceived.removeListener(onForeignHeadersReceived);
-  const granted = await ext.permissions.contains({ origins: ["<all_urls>"] });
-  if (settings.captureForeign && granted) {
-    ext.webRequest.onHeadersReceived.addListener(
-      onForeignHeadersReceived,
-      { urls: ["<all_urls>"], types: RESOURCE_TYPES },
-      ["blocking", "responseHeaders"]
-    );
-    debug("Fremd-Domains werden mit überwacht");
-  }
-}
-
 // ---------------------------------------------------------------------------------------
 // Chrome: PDF downloads are paused, fetched again by the extension and then resumed or removed
 // ---------------------------------------------------------------------------------------
@@ -360,8 +349,7 @@ async function onDownloadCreatedChrome(item) {
   const url = item.finalUrl || item.url;
   // blob:/data: downloads were already decided by the page hooks before the download started.
   if (!/^https?:/i.test(url)) return;
-  const foreignAllowed = settings.captureForeign && (await ext.permissions.contains({ origins: ["<all_urls>"] }));
-  if (!anyFromWebApp(url, item.referrer) || (!anyFromWebApp(url) && !foreignAllowed)) return;
+  if (!anyConfigured(url) && !(settings.captureForeign && anyConfigured(item.referrer))) return;
   if (!isPdfContentType(item.mime, basename(item.filename) || filenameFromUrl(url))) return;
   handledDownloads.add(item.id);
 
@@ -389,6 +377,7 @@ async function onDownloadCreatedChrome(item) {
 // Chrome: PDFs opened directly in a tab or frame cannot be held back – log it so it is visible.
 function onHeadersReceivedChrome(details) {
   if (!settings?.enabled || details.statusCode < 200 || details.statusCode >= 300) return;
+  if (!anyConfigured(details.url, details.initiator)) return;
   const cd = header(details, "content-disposition");
   if (/^\s*attachment/i.test(cd)) return; // handled as download
   const filename = filenameFromDisposition(cd) || filenameFromUrl(details.url);
@@ -407,21 +396,67 @@ function onHeadersReceivedChrome(details) {
 if (CAN_FILTER_RESPONSES) {
   ext.webRequest.onHeadersReceived.addListener(
     onHeadersReceived,
-    { urls: WEBAPP_PATTERNS, types: RESOURCE_TYPES },
+    { urls: ["<all_urls>"], types: RESOURCE_TYPES },
     ["blocking", "responseHeaders"]
   );
   ext.downloads.onCreated.addListener(onDownloadCreatedFirefox);
-  registerForeignListener();
-  ext.permissions.onAdded.addListener(registerForeignListener);
-  ext.permissions.onRemoved.addListener(registerForeignListener);
 } else {
   ext.downloads.onCreated.addListener(onDownloadCreatedChrome);
   ext.webRequest.onHeadersReceived.addListener(
     onHeadersReceivedChrome,
-    { urls: WEBAPP_PATTERNS, types: ["main_frame", "sub_frame"] },
+    { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
     ["responseHeaders"]
   );
 }
+
+// ---------------------------------------------------------------------------------------
+// Content scripts: registered at runtime for the configured (and permitted) domains
+// ---------------------------------------------------------------------------------------
+
+const SCRIPT_IDS = ["rpp-bridge", "rpp-main-world"];
+let syncing = Promise.resolve();
+
+function syncContentScripts() {
+  syncing = syncing
+    .then(doSyncContentScripts)
+    .catch((err) => warn("Inhaltsskripte konnten nicht registriert werden:", err));
+  return syncing;
+}
+
+async function doSyncContentScripts() {
+  await settingsReady;
+  const permitted = [];
+  const missing = [];
+  for (const d of activeDomains) {
+    ((await ext.permissions.contains({ origins: [d.pattern] })) ? permitted : missing).push(d.pattern);
+  }
+  if (missing.length) warn("Keine Berechtigung für", missing.join(", "), "– bitte in den Einstellungen speichern und erlauben");
+
+  const registered = await ext.scripting.getRegisteredContentScripts({ ids: SCRIPT_IDS }).catch(() => []);
+  if (registered.length) await ext.scripting.unregisterContentScripts({ ids: registered.map((r) => r.id) });
+  if (!permitted.length) {
+    debug("Keine Domains aktiv");
+    return;
+  }
+  const common = { matches: permitted, runAt: "document_start", allFrames: true, persistAcrossSessions: true };
+  const scripts = [
+    { id: SCRIPT_IDS[0], js: ["content/bridge.js"], ...common },
+    { id: SCRIPT_IDS[1], js: ["content/main-world.js"], world: "MAIN", ...common },
+  ];
+  try {
+    // Also run in about:blank / blob: frames created by these pages.
+    await ext.scripting.registerContentScripts(scripts.map((x) => ({ ...x, matchOriginAsFallback: true })));
+  } catch (err) {
+    debug("matchOriginAsFallback nicht unterstützt, registriere ohne", err);
+    await ext.scripting.registerContentScripts(scripts);
+  }
+  debug("Aktiv auf", permitted.join(", "));
+}
+
+ext.runtime.onInstalled.addListener(() => syncContentScripts());
+ext.runtime.onStartup.addListener(() => syncContentScripts());
+ext.permissions.onAdded.addListener(() => syncContentScripts());
+ext.permissions.onRemoved.addListener(() => syncContentScripts());
 
 // ---------------------------------------------------------------------------------------
 // Messages from content scripts, popup and options page
@@ -455,6 +490,8 @@ function handleMessage(msg, sender) {
       return null;
     case "getSettings":
       return settingsReady.then(() => ({ enabled: settings.enabled, debug: settings.debug }));
+    case "syncContentScripts":
+      return syncContentScripts().then(() => ({ ok: true }));
     case "health":
       return checkHealth(msg.serverUrl, msg.token);
     default:

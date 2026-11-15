@@ -16,7 +16,7 @@ body.page {
 }
 h1 { font-size: 1.4rem; color: var(--accent); }
 label { display: block; margin: 0.9rem 0; }
-label input:not([type=checkbox]), label select {
+label input:not([type=checkbox]), label select, label textarea {
   display: block; width: 100%; box-sizing: border-box; margin-top: 0.3rem; padding: 0.4rem; font: inherit;
 }
 label.check { display: flex; gap: 0.5rem; align-items: flex-start; }

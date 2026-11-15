@@ -1,12 +1,15 @@
 # remote-pdf-printer
 
-Browser-Erweiterung (Firefox und Chrome) und kleiner Python-Server, die PDFs aus **app.example.org** abfangen und je nach
-Dokumenttyp automatisch **auf dem richtigen Drucker drucken** (z. B. A6-Rezepte auf dem Rezeptdrucker,
+Browser-Erweiterung (Firefox und Chrome) und kleiner Python-Server, die PDFs aus Web-Anwendungen
+abfangen und je nach Dokumenttyp automatisch **auf dem richtigen Drucker drucken** (z. B. A6-Rezepte auf dem Rezeptdrucker,
 A4 auf dem A4-Drucker) und/oder **in Ordnern ablegen** (z. B. Rechnungen für ein Nachbearbeitungsprogramm).
 Damit muss im Browser kein Drucker mehr umgestellt werden.
 
+Auf welchen Websites die Erweiterung aktiv ist, wird in ihren Einstellungen festgelegt (z. B.
+`app.example.org` oder `*.example.org`). Auf allen anderen Seiten tut sie nichts.
+
 ```
-Browser (WebApp)                         Druckserver (Linux im LAN)
+Browser (Web-Anwendung)                    Druckserver (Linux im LAN)
 ┌──────────────────────────┐  HTTPS +   ┌───────┐ HTTP  ┌────────────────────────────────────┐
 │ Erweiterung fängt PDF ab │── Token ──▶│ Caddy │──────▶│ erkennt Typ (Format, Text, Name)   │
 │ wartet auf Entscheidung  │◀── JSON ───│ (TLS) │◀──────│ legt ab: /srv/remote-pdf/<typ>/  │
@@ -191,9 +194,15 @@ Die Vorlage lässt zusätzlich zum Token nur private Netze zu und begrenzt Uploa
 
    Zum Prüfen `https://druckserver.local/api/health` im Browser öffnen: Es darf keine Zertifikatswarnung
    erscheinen, die Antwort ist `{"error": "invalid token"}`.
-2. Erweiterung installieren (siehe unten), in den Einstellungen der Erweiterung Server-Adresse
-   (z. B. `https://druckserver.local`) und Token eintragen, **Speichern** und die angefragte Berechtigung
-   erlauben. Unter dem Formular sollte dann „Verbunden mit Server …“ und die Liste der Kategorien stehen.
+2. Erweiterung installieren (siehe unten) und ihre Einstellungen öffnen:
+   - **Server-Adresse** (z. B. `https://druckserver.local`) und **Token** eintragen.
+   - Unter **„Aktiv auf diesen Websites“** die Domains der Web-Anwendung eintragen, eine pro Zeile.
+     `app.example.org` gilt genau für diese Adresse, `*.example.org` für `example.org` und alle Subdomains.
+     Eine kopierte vollständige Adresse wie `https://app.example.org/start` wird auf die Domain gekürzt.
+   - **Speichern** und die angefragten Berechtigungen erlauben. Die Erweiterung bekommt nur Zugriff auf die
+     eingetragenen Websites und den Server. Bereits geöffnete Tabs der Web-Anwendung danach neu laden.
+
+   Unter dem Formular sollte dann „Verbunden mit Server …“ und die Liste der Kategorien stehen.
 
 Über das Symbol in der Symbolleiste lässt sich die Erweiterung ein- und ausschalten. Dort sieht man
 auch die zuletzt verarbeiteten Dokumente.
@@ -250,24 +259,25 @@ Das erzeugt `extension/dist/chrome/` (entpackte Erweiterung) und
   5 US-Dollar). Dort die ZIP-Datei hochladen und als Sichtbarkeit *„Nicht gelistet“* wählen. Google prüft
   die Erweiterung vor der Freigabe.
 
-**Was Chrome nicht kann:** Firefox kann PDFs abfangen, die WebApp direkt vom Server in einem Tab oder
-Rahmen öffnet. Chrome bietet dafür keine Schnittstelle. Die Chrome-Version meldet solche Fälle nur im
-Protokoll („PDF wird direkt im Tab geöffnet …“). Nach bisherigem Stand erzeugt WebApp Rezepte aber im
-Browser und öffnet sie mit `window.open`. Das funktioniert in beiden Browsern gleich.
+**Was Chrome nicht kann:** Firefox kann PDFs abfangen, die eine Web-Anwendung direkt vom Server in einem
+Tab oder Rahmen öffnet. Chrome bietet dafür keine Schnittstelle. Die Chrome-Version meldet solche Fälle nur im
+Protokoll („PDF wird direkt im Tab geöffnet …“). Viele Web-Anwendungen erzeugen PDFs aber im Browser und
+öffnen sie mit `window.open` oder drucken sie aus einem versteckten Rahmen. Das funktioniert in beiden
+Browsern gleich.
 
 ## Wie die Erweiterung PDFs abfängt
 
-Wie WebApp seine PDFs genau ausliefert, ist nicht dokumentiert. Die Erweiterung deckt deshalb mehrere Wege ab:
+Web-Anwendungen liefern PDFs auf unterschiedlichen Wegen aus. Die Erweiterung deckt deshalb mehrere ab:
 
 | Weg | Technik | Firefox | Chrome |
 |---|---|---|---|
 | PDF wird im Browser als Blob/`data:`-URL erzeugt und dann … | Hooks in der Seite (`content/main-world.js`): | | |
-| … per `window.open()` geöffnet (so bei Rezepten beobachtet) | Öffnen wird bis zur Entscheidung zurückgehalten | ✓ | ✓ |
+| … per `window.open()` geöffnet | Öffnen wird bis zur Entscheidung zurückgehalten | ✓ | ✓ |
 | … in ein (verstecktes) iframe/embed/object geladen und gedruckt | `src` wird erst nach der Entscheidung gesetzt; `print()` auf unterdrückten Frames wird ignoriert | ✓ | ✓ |
 | … über einen Link `<a download>` heruntergeladen | Klick wird erst nach der Entscheidung ausgeführt | ✓ | ✓ |
-| PDF wird per HTTP von `*.example.de/.com/.net` heruntergeladen | Firefox: Antwort wird gepuffert. Chrome: Download wird angehalten, das PDF nachgeladen, danach fortgesetzt oder entfernt | ✓ | ✓ |
+| PDF wird per HTTP von einer eingetragenen Website heruntergeladen | Firefox: Antwort wird gepuffert. Chrome: Download wird angehalten, das PDF nachgeladen, danach fortgesetzt oder entfernt | ✓ | ✓ |
 | PDF wird per HTTP direkt in einem Tab oder iframe geöffnet | Firefox: `webRequest.filterResponseData` puffert die Antwort, bis der Server entschieden hat. Bei `suppress` wird der Tab geschlossen bzw. zurücknavigiert | ✓ | nur Hinweis im Protokoll |
-| PDF kommt von einer fremden Domain (z. B. Cloud-Speicher) | Option „Auch PDFs von anderen Domains“ in den Einstellungen; erfasst nur Anfragen, die von WebApp ausgehen | ✓ | nur Downloads |
+| PDF kommt von einer fremden Domain (z. B. Cloud-Speicher) | Option „Auch PDFs von anderen Domains“ in den Einstellungen; erfasst nur Anfragen, die von einer eingetragenen Website ausgehen | ✓ | nur Downloads |
 
 Gleiche PDFs, die auf mehreren Wegen auftauchen, werden nur einmal gedruckt: Die Erweiterung erkennt
 Duplikate innerhalb von 15 s, der Server innerhalb von 20 s.
@@ -275,14 +285,14 @@ Duplikate innerhalb von 15 s, der Server innerhalb von 20 s.
 ### Wenn ein Dokument nicht abgefangen wird
 
 1. In den Einstellungen der Erweiterung den **Debug-Modus** einschalten.
-2. Die Konsole öffnen und das Dokument in WebApp erneut öffnen bzw. drucken:
+2. Die Konsole öffnen und das Dokument in der Web-Anwendung erneut öffnen bzw. drucken:
    - **Firefox:** Browser-Konsole (Strg+Umschalt+J). Sie zeigt alle Meldungen.
-   - **Chrome:** Die Meldungen der WebApp-Seite stehen in den Entwicklertools der Seite (F12 → *Konsole*).
+   - **Chrome:** Die Meldungen der Web-Anwendung stehen in den Entwicklertools der Seite (F12 → *Konsole*).
      Die Meldungen des Hintergrundskripts erscheinen unter `chrome://extensions` → *Remote PDF Printer* →
      *Service Worker*.
 3. Die Meldungen mit `[PDF-Drucker]` zeigen, was erkannt wurde und warum entschieden wurde. Probleme wie
    „Server nicht erreichbar“ erscheinen dort immer, auch ohne Debug-Modus. Bei „PDF-Blob wurde nicht über einen
-   bekannten Weg verwendet“ nutzt WebApp einen Weg, der noch nicht abgedeckt ist. Mit diesen
+   bekannten Weg verwendet“ nutzt die Web-Anwendung einen Weg, der noch nicht abgedeckt ist. Mit diesen
    Meldungen lässt sich die Erweiterung gezielt erweitern.
 
 ## Entwicklung
@@ -302,7 +312,8 @@ cd server && .venv/bin/remote-pdf-printer -c config.toml
 ```
 
 Ende-zu-Ende-Test der Chrome-Version: Echtes Chromium mit geladener Erweiterung, eine nachgebaute
-WebApp-Seite und der echte Server mit simuliertem Drucker. Voraussetzungen sind Playwright mit Chromium,
+Web-Anwendung und der echte Server mit simuliertem Drucker. Geprüft wird auch, dass die Erweiterung auf
+nicht eingetragenen Domains inaktiv bleibt. Voraussetzungen sind Playwright mit Chromium,
 `openssl` und eine Python-Umgebung mit installiertem Server:
 
 ```bash
@@ -319,7 +330,7 @@ API:
 
 ## Datenschutz
 
-Die PDFs enthalten Patientendaten. Sie verlassen den Praxis-PC nur in Richtung des eingetragenen
+Die PDFs können vertrauliche Daten enthalten, z. B. Patientendaten. Sie verlassen den Praxis-PC nur in Richtung des eingetragenen
 eigenen Servers und werden dabei per TLS (Caddy) verschlüsselt und per Token authentifiziert. Der Server
 protokolliert Dateiname, Format und Kategorie, aber keine Dokumentinhalte. Der Ablageordner sollte
 entsprechend geschützt und gesichert werden.

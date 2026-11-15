@@ -2,13 +2,15 @@
   "manifest_version": 3,
   "name": "Remote PDF Printer",
   "version": "0.1.0",
-  "description": "Fängt PDFs aus WebApp ab und schickt sie an einen eigenen Druckserver im Praxisnetz, der sie je nach Dokumenttyp ablegt und auf dem passenden Drucker druckt.",
+  "description": "Fängt PDFs auf frei wählbaren Websites ab und schickt sie an einen eigenen Druckserver im lokalen Netz, der sie je nach Dokumenttyp ablegt und auf dem passenden Drucker druckt.",
   "browser_specific_settings": {
     "gecko": {
       "id": "remote-pdf-printer@klovadis.github.io",
       "strict_min_version": "128.0",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": [
+          "none"
+        ]
       }
     }
   },
@@ -22,36 +24,18 @@
     "webRequestFilterResponse",
     "downloads",
     "notifications",
+    "scripting",
     "storage"
-  ],
-  "host_permissions": [
-    "*://*.example.de/*",
-    "*://*.example.com/*",
-    "*://*.example.net/*"
   ],
   "optional_host_permissions": [
     "<all_urls>"
   ],
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "common/domains.js",
+      "background.js"
+    ]
   },
-  "content_scripts": [
-    {
-      "matches": ["*://*.example.de/*", "*://*.example.com/*", "*://*.example.net/*"],
-      "js": ["content/bridge.js"],
-      "run_at": "document_start",
-      "all_frames": true,
-      "match_about_blank": true
-    },
-    {
-      "matches": ["*://*.example.de/*", "*://*.example.com/*", "*://*.example.net/*"],
-      "js": ["content/main-world.js"],
-      "run_at": "document_start",
-      "all_frames": true,
-      "match_about_blank": true,
-      "world": "MAIN"
-    }
-  ],
   "action": {
     "default_title": "Remote PDF Printer",
     "default_icon": "icons/icon.svg",

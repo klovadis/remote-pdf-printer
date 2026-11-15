@@ -37,6 +37,6 @@ $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) 
     -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal `
-    -Settings $settings -Description 'Nimmt PDFs der Firefox-Erweiterung entgegen und druckt sie.' -Force | Out-Null
+    -Settings $settings -Description 'Nimmt PDFs der Browser-Erweiterung entgegen und druckt sie.' -Force | Out-Null
 Start-ScheduledTask -TaskName $taskName
 Write-Host "Aufgabe '$taskName' eingerichtet und gestartet. Protokoll: $log"

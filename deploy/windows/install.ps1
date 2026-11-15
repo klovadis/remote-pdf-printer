@@ -48,7 +48,7 @@ if (Test-Path $config) {
     [IO.File]::WriteAllText($config, $text, (New-Object Text.UTF8Encoding $false))
     Write-Host "Konfiguration angelegt: $config"
     Write-Host ''
-    Write-Host "API-Token für die Firefox-Erweiterung: $token" -ForegroundColor Yellow
+    Write-Host "API-Token für die Browser-Erweiterung: $token" -ForegroundColor Yellow
 }
 
 # --- Prüfen -------------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 // End-to-end test of the Chrome version:
-//   real Chromium + built extension + fake "app.example.org" page (HTTPS, local) + real print server.
+//   real Chromium + built extension + fake web application on "app.example.test" (HTTPS, local)
+//   + real print server.
 //
 //   cd extension && npm run test:chrome
 //
@@ -66,9 +67,9 @@ function freePort() {
   });
 }
 
-// --- fake WebApp (HTTPS) ------------------------------------------------------------------
+// --- fake web application (HTTPS) ---------------------------------------------------------
 async function startWebApp() {
-  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=app.example.org",
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=app.example.test",
     "-keyout", join(work, "key.pem"), "-out", join(work, "cert.pem")], { stdio: "ignore" });
   const port = await freePort();
   const server = https.createServer({ key: readFileSync(join(work, "key.pem")), cert: readFileSync(join(work, "cert.pem")) }, (req, res) => {
@@ -78,10 +79,10 @@ async function startWebApp() {
       return res.end(PDFS[name]);
     }
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end("<!doctype html><title>WebApp (Test)</title><body>Test</body>");
+    res.end("<!doctype html><title>Web-App (Test)</title><body>Test</body>");
   });
   await new Promise((r) => server.listen(port, "127.0.0.1", r));
-  return { server, origin: `https://app.example.org:${port}` };
+  return { server, origin: `https://app.example.test:${port}`, otherOrigin: `https://other.example.test:${port}` };
 }
 
 // --- real print server ----------------------------------------------------------------------
@@ -129,7 +130,7 @@ const { outDir } = buildChrome(join(work, "ext"));
 // Test only: grant the local server origin up front (normally requested on the options page).
 const manifestPath = join(outDir, "manifest.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-manifest.host_permissions.push("http://127.0.0.1/*");
+manifest.host_permissions = ["http://127.0.0.1/*", "*://app.example.test/*", "*://other.example.test/*"];
 writeFileSync(manifestPath, JSON.stringify(manifest));
 
 const context = await chromium.launchPersistentContext(join(work, "profile"), {
@@ -139,7 +140,7 @@ const context = await chromium.launchPersistentContext(join(work, "profile"), {
   args: [
     `--disable-extensions-except=${outDir}`,
     `--load-extension=${outDir}`,
-    "--host-resolver-rules=MAP app.example.org 127.0.0.1",
+    "--host-resolver-rules=MAP *.example.test 127.0.0.1",
     "--ignore-certificate-errors",
     "--no-proxy-server", // talk to the local test servers directly
   ],
@@ -150,9 +151,17 @@ try {
   worker ??= await context.waitForEvent("serviceworker", { timeout: 10000 });
   worker.on("console", (m) => consoleLines.push("[sw] " + m.text()));
   await worker.evaluate(
-    ([serverUrl, token]) => chrome.storage.local.set({ serverUrl, token, enabled: true, debug: true, notify: "none" }),
+    ([serverUrl, token]) =>
+      chrome.storage.local.set({ serverUrl, token, domains: ["app.example.test"], enabled: true, debug: true, notify: "none" }),
     [printer.url, TOKEN]
   );
+  // The background registers the content scripts for the configured domain.
+  let registered = [];
+  for (let i = 0; i < 50 && registered.length < 2; i++) {
+    await sleep(100);
+    registered = await worker.evaluate(() => chrome.scripting.getRegisteredContentScripts());
+  }
+  assert.deepEqual(registered.map((r) => r.matches).flat(), ["*://app.example.test/*", "*://app.example.test/*"]);
 
   const page = await context.newPage();
   page.on("console", (m) => consoleLines.push("[page] " + m.text()));
@@ -162,7 +171,7 @@ try {
   const popups = [];
   context.on("page", (p) => popups.push(p.url()));
 
-  // Like WebApp: fetch PDF, make a blob URL, window.open it.
+  // Like the real web application: fetch PDF, make a blob URL, window.open it.
   const openBlob = (name) =>
     page.evaluate(async (n) => {
       const blob = await (await fetch("/" + n + "?inline")).blob();
@@ -219,6 +228,23 @@ try {
     assert.equal(stored("rechnungen").length, 1, "Rechnung nicht abgelegt");
     const list = await worker.evaluate(() => chrome.downloads.search({}));
     assert.equal(list.filter((d) => d.url.includes("rechnung.pdf")).length, 0, "Download ist noch in der Liste: " + JSON.stringify(list));
+  });
+
+  await check("Nicht eingetragene Domain: Erweiterung bleibt inaktiv", async () => {
+    const other = await context.newPage();
+    await other.goto(webapp.otherOrigin + "/praxis");
+    const before = popups.length;
+    const lpBefore = lpLog();
+    const hooked = await other.evaluate(() => Boolean(window[Symbol.for("__remotePdfPrinter")]));
+    await other.evaluate(async () => {
+      const blob = await (await fetch("/rezept.pdf?inline")).blob();
+      window.open(URL.createObjectURL(new Blob([blob, "  "], { type: "application/pdf" })));
+    });
+    await sleep(1000);
+    assert.equal(hooked, false, "Hooks sind auf der nicht eingetragenen Domain aktiv");
+    assert.equal(popups.length, before + 1, "PDF-Fenster wurde nicht geöffnet");
+    assert.equal(lpLog(), lpBefore, "es wurde trotzdem gedruckt");
+    await other.close();
   });
 
   await check("Server nicht erreichbar: Dokument wird normal geöffnet, Grund im Protokoll", async () => {

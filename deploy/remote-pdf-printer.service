@@ -1,5 +1,5 @@
 [Unit]
-Description=WebApp PDF-Druckserver
+Description=Remote PDF Printer (Druckserver)
 After=network-online.target cups.service
 Wants=network-online.target
 

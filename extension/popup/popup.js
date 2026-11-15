@@ -12,8 +12,9 @@ function el(tag, cls, text) {
 }
 
 async function init() {
-  const s = await ext.storage.local.get({ enabled: true, serverUrl: "" });
+  const s = await ext.storage.local.get({ enabled: true, serverUrl: "", domains: [] });
   $("enabled").checked = s.enabled;
+  $("domains").textContent = s.domains.length ? `Aktiv auf: ${s.domains.join(", ")}` : "Noch keine Website eingerichtet";
   $("server").textContent = s.serverUrl || "Kein Server eingerichtet";
 
   if (s.serverUrl) {
