@@ -36,6 +36,22 @@ def build_filename(template: str, category: str, original: str, now: datetime | 
     return safe_name(stem, fallback=f"{category}_{now:%Y%m%d-%H%M%S}") + ".pdf"
 
 
+def _publish(tmp: str, target: Path) -> None:
+    """Move tmp to target; raise FileExistsError if target exists."""
+    try:
+        os.link(tmp, target)  # atomic and never overwrites
+    except FileExistsError:
+        raise
+    except OSError:
+        # Hard links unsupported (e.g. FAT/exFAT drives, some network shares).
+        if os.name == "nt":
+            os.rename(tmp, target)  # on Windows rename refuses to overwrite
+        else:
+            if target.exists():
+                raise FileExistsError(target)
+            os.rename(tmp, target)
+
+
 def store_pdf(data: bytes, directory: Path, filename: str) -> Path:
     """Write atomically into directory; never overwrite an existing file."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -53,14 +69,16 @@ def store_pdf(data: bytes, directory: Path, filename: str) -> Path:
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, 0o640)
-        # os.link fails if target appeared meanwhile -> retry with next number.
+        # Publish under the final name without ever overwriting: if the target appeared
+        # meanwhile, retry with the next number.
         while True:
             try:
-                os.link(tmp, target)
+                _publish(tmp, target)
                 break
             except FileExistsError:
                 n += 1
                 target = directory / f"{stem}_{n}{suffix}"
     finally:
-        os.unlink(tmp)
+        if os.path.exists(tmp):
+            os.unlink(tmp)
     return target

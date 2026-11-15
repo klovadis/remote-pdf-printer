@@ -50,6 +50,7 @@ def config(tmp_path):
     raw = EXAMPLE_CONFIG.read_text(encoding="utf-8")
     raw = raw.replace('dir = "/srv/remote-pdf"', f'dir = "{tmp_path / "docs"}"')
     raw = raw.replace('lp_command = "lp"', f'lp_command = "{tmp_path / "fake-lp"}"')
+    raw = raw.replace('backend = "auto"', 'backend = "cups"')
     cfg_path = tmp_path / "config.toml"
     cfg_path.write_text(raw, encoding="utf-8")
     # Fake lp: records its arguments and prints a CUPS-like job id.

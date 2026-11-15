@@ -95,7 +95,7 @@ class Processor:
 
         if cat.print is not None:
             try:
-                out = print_pdf(cfg.lp_command, cat.print, data, title=f"{cat.label}: {filename or 'Dokument'}", path=stored_path)
+                out = print_pdf(cfg.printing, cat.print, data, title=f"{cat.label}: {filename or 'Dokument'}", path=stored_path)
                 result["printed"] = {"printer": cat.print.printer, "job": out}
             except PrintError as exc:
                 log.error("Drucken auf %s fehlgeschlagen: %s", cat.print.printer, exc)

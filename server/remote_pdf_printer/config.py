@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -18,6 +19,12 @@ PAPER_SIZES_MM: dict[str, tuple[float, float]] = {
 }
 
 BROWSER_ACTIONS = ("show", "suppress")
+PRINT_BACKENDS = ("cups", "sumatra")
+# Paper names understood by both CUPS (media=) and SumatraPDF (paper=).
+PRINT_PAPERS = {"A3": "A3", "A4": "A4", "A5": "A5", "A6": "A6", "LETTER": "Letter", "LEGAL": "Legal"}
+PRINT_SCALING = ("fit", "shrink", "none")
+PRINT_ORIENTATION = ("auto", "portrait", "landscape")
+PRINT_DUPLEX = ("none", "long", "short")
 
 
 class ConfigError(ValueError):
@@ -27,8 +34,20 @@ class ConfigError(ValueError):
 @dataclass
 class PrintSettings:
     printer: str
-    options: list[str] = field(default_factory=list)
     copies: int = 1
+    paper: str | None = None  # key of PRINT_PAPERS, None = printer default
+    scaling: str = "fit"
+    orientation: str = "auto"
+    duplex: str | None = None  # None = printer default
+    options: list[str] = field(default_factory=list)  # extra CUPS "-o" options
+    sumatra_settings: list[str] = field(default_factory=list)  # extra SumatraPDF -print-settings
+
+
+@dataclass
+class PrintingSettings:
+    backend: str  # "cups" | "sumatra"
+    lp_command: str = "lp"
+    sumatra_path: str | None = None  # None = search default install locations
 
 
 @dataclass
@@ -72,7 +91,7 @@ class Config:
     storage_dir: Path
     filename_template: str
     text_pages: int
-    lp_command: str
+    printing: PrintingSettings
     categories: dict[str, Category]
     rules: list[Rule]
     default_category: str
@@ -101,6 +120,67 @@ def _parse_page_size(value, where: str) -> tuple[tuple[float, float], str]:
     raise ConfigError(f"{where}: page_size muss z.B. \"A6\" oder [105, 148] sein")
 
 
+def _choice(raw: dict, key: str, allowed, default, where: str):
+    value = raw.get(key, default)
+    if value is not None and value not in allowed:
+        raise ConfigError(f"{where}.{key} muss einer von {', '.join(allowed)} sein, nicht {value!r}")
+    return value
+
+
+def _str_list(value, where: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    raise ConfigError(f"{where} muss eine Liste von Texten sein")
+
+
+def _parse_print(p: dict, where: str) -> PrintSettings:
+    if not p.get("printer"):
+        raise ConfigError(f"{where}.printer fehlt")
+    known = {"printer", "copies", "paper", "scaling", "orientation", "duplex", "options", "sumatra_settings"}
+    unknown = set(p) - known
+    if unknown:
+        raise ConfigError(f"{where}: unbekannte Schlüssel {sorted(unknown)}")
+    copies = int(p.get("copies", 1))
+    if copies < 1:
+        raise ConfigError(f"{where}.copies muss >= 1 sein")
+    paper = p.get("paper")
+    if paper is not None:
+        paper = str(paper).upper()
+        if paper not in PRINT_PAPERS:
+            raise ConfigError(f"{where}.paper muss einer von {', '.join(PRINT_PAPERS.values())} sein")
+    return PrintSettings(
+        printer=str(p["printer"]),
+        copies=copies,
+        paper=paper,
+        scaling=_choice(p, "scaling", PRINT_SCALING, "fit", where),
+        orientation=_choice(p, "orientation", PRINT_ORIENTATION, "auto", where),
+        duplex=_choice(p, "duplex", PRINT_DUPLEX, None, where),
+        options=_str_list(p.get("options"), f"{where}.options"),
+        sumatra_settings=_str_list(p.get("sumatra_settings"), f"{where}.sumatra_settings"),
+    )
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _parse_printing(raw: dict) -> PrintingSettings:
+    backend = raw.get("backend", "auto")
+    if backend == "auto":
+        backend = "sumatra" if _is_windows() else "cups"
+    if backend not in PRINT_BACKENDS:
+        raise ConfigError(f"printing.backend muss auto, {' oder '.join(PRINT_BACKENDS)} sein")
+    return PrintingSettings(
+        backend=backend,
+        lp_command=raw.get("lp_command", "lp"),
+        sumatra_path=raw.get("sumatra_path") or None,
+    )
+
+
 def _parse_category(name: str, raw: dict) -> Category:
     where = f"categories.{name}"
     browser = raw.get("browser", "show")
@@ -112,13 +192,7 @@ def _parse_category(name: str, raw: dict) -> Category:
             raise ConfigError(f"{where}.folder muss ein relativer Pfad ohne '..' sein")
     print_settings = None
     if raw.get("print"):
-        p = raw["print"]
-        if not p.get("printer"):
-            raise ConfigError(f"{where}.print.printer fehlt")
-        copies = int(p.get("copies", 1))
-        if copies < 1:
-            raise ConfigError(f"{where}.print.copies muss >= 1 sein")
-        print_settings = PrintSettings(printer=str(p["printer"]), options=[str(o) for o in p.get("options", [])], copies=copies)
+        print_settings = _parse_print(raw["print"], f"{where}.print")
     return Category(name=name, label=raw.get("label", name), folder=folder, browser=browser, print=print_settings)
 
 
@@ -198,7 +272,7 @@ def parse_config(raw: dict, base_dir: Path | None = None) -> Config:
         storage_dir=storage_dir,
         filename_template=st.get("filename_template", "{date}_{time}_{category}_{name}"),
         text_pages=int(c.get("text_pages", 3)),
-        lp_command=raw.get("printing", {}).get("lp_command", "lp"),
+        printing=_parse_printing(raw.get("printing", {})),
         categories=categories,
         rules=rules,
         default_category=default,

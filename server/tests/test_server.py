@@ -71,6 +71,14 @@ def test_rule_order_and_text_none(config):
          "rules": [{"category": "x", "page_size": "B5"}]},
         {"server": {"api_token": TOKEN}, "classification": {"default_category": "x"}, "categories": {"x": {}},
          "rules": [{"category": "x", "txt_any": ["typo"]}]},
+        {"server": {"api_token": TOKEN}, "classification": {"default_category": "x"},
+         "categories": {"x": {"print": {"printer": "p", "paper": "B5"}}}},
+        {"server": {"api_token": TOKEN}, "classification": {"default_category": "x"},
+         "categories": {"x": {"print": {"printer": "p", "duplex": "yes"}}}},
+        {"server": {"api_token": TOKEN}, "classification": {"default_category": "x"},
+         "categories": {"x": {"print": {"printer": "p", "papre": "A4"}}}},
+        {"server": {"api_token": TOKEN}, "classification": {"default_category": "x"}, "categories": {"x": {}},
+         "printing": {"backend": "windows"}},
         {"server": {"api_token": TOKEN, "tls_cert": "x.crt"}, "classification": {"default_category": "x"}, "categories": {"x": {}}},
         {"server": {"api_token": TOKEN, "trusted_proxies": ["kein-netz"]}, "classification": {"default_category": "x"}, "categories": {"x": {}}},
     ],
@@ -217,3 +225,70 @@ def test_http_allowed_clients_behind_proxy(config, http_server):
     assert _req(http_server + "/api/health", headers={"X-Forwarded-For": "192.168.1.5"})[0] == 200
     assert _req(http_server + "/api/health", headers={"X-Forwarded-For": "10.1.2.3"})[0] == 403
     assert _req(http_server + "/api/health", headers={"X-Forwarded-For": "192.168.1.5, 10.1.2.3"})[0] == 403
+
+
+# --- print backends ------------------------------------------------------------------------------
+
+from remote_pdf_printer.config import PrintingSettings, PrintSettings  # noqa: E402
+from remote_pdf_printer.printing import (  # noqa: E402
+    PrintError, build_lp_command, build_sumatra_command, find_sumatra, print_pdf,
+)
+
+
+def test_cups_command_mapping(tmp_path):
+    s = PrintSettings(printer="Rezept", paper="A6", scaling="fit", orientation="landscape", duplex="none",
+                      copies=2, options=["InputSlot=Tray2"])
+    cmd = build_lp_command("lp", s, tmp_path / "a.pdf", "t")
+    assert cmd[:4] == ["lp", "-d", "Rezept", "-n"] and cmd[4] == "2"
+    opts = [cmd[i + 1] for i, c in enumerate(cmd) if c == "-o"]
+    assert opts == ["media=A6", "fit-to-page", "print-scaling=fit", "orientation-requested=4", "sides=one-sided", "InputSlot=Tray2"]
+
+
+def test_sumatra_command_mapping(tmp_path):
+    s = PrintSettings(printer="HP LaserJet (Fach 2)", paper="A4", scaling="shrink", duplex="long", copies=3,
+                      sumatra_settings=["bin=2"])
+    cmd = build_sumatra_command(tmp_path / "SumatraPDF.exe", s, tmp_path / "a.pdf")
+    assert cmd[1:5] == ["-print-to", "HP LaserJet (Fach 2)", "-print-settings", "shrink,paper=A4,duplexlong,3x,bin=2"]
+    assert cmd[5:] == ["-silent", str(tmp_path / "a.pdf")]
+    default = build_sumatra_command(tmp_path / "s.exe", PrintSettings(printer="p"), tmp_path / "a.pdf")
+    assert default[4] == "fit"
+
+
+def test_print_with_fake_sumatra(tmp_path):
+    exe = tmp_path / "SumatraPDF.exe"
+    exe.write_text(f'#!/bin/sh\necho "$@" > "{tmp_path / "sumatra.log"}"\n')
+    exe.chmod(0o755)
+    out = print_pdf(PrintingSettings(backend="sumatra", sumatra_path=str(exe)), PrintSettings(printer="Rezept", paper="A6"),
+                    make_pdf(105, 148), "Rezept")
+    assert out == "ok"
+    logged = (tmp_path / "sumatra.log").read_text()
+    assert logged.startswith("-print-to Rezept -print-settings fit,paper=A6 -silent ")
+
+
+def test_sumatra_missing(tmp_path, monkeypatch):
+    with pytest.raises(PrintError, match="sumatra_path"):
+        find_sumatra(str(tmp_path / "nope.exe"))
+    for var in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(PrintError, match="nicht gefunden"):
+        find_sumatra(None)
+
+
+def test_backend_auto(monkeypatch):
+    raw = {"server": {"api_token": TOKEN}, "classification": {"default_category": "x"}, "categories": {"x": {}}}
+    monkeypatch.setattr("remote_pdf_printer.config._is_windows", lambda: True)
+    assert parse_config(raw).printing.backend == "sumatra"
+    monkeypatch.setattr("remote_pdf_printer.config._is_windows", lambda: False)
+    assert parse_config(raw).printing.backend == "cups"
+
+
+def test_store_without_hardlinks(tmp_path, monkeypatch):
+    def no_link(*a):
+        raise OSError("hard links not supported")
+    monkeypatch.setattr("remote_pdf_printer.storage.os.link", no_link)
+    a = store_pdf(b"%PDF-a", tmp_path, "x.pdf")
+    b = store_pdf(b"%PDF-b", tmp_path, "x.pdf")
+    assert (a.name, b.name) == ("x.pdf", "x_2.pdf")
+    assert a.read_bytes() == b"%PDF-a" and b.read_bytes() == b"%PDF-b"
+    assert not list(tmp_path.glob(".incoming-*"))

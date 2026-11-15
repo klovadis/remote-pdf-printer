@@ -1,6 +1,9 @@
 # Konfiguration des Remote-PDF-Druckservers
-# Kopieren nach /etc/remote-pdf-printer/config.toml und anpassen.
+# Kopieren und anpassen:
+#   Linux:   /etc/remote-pdf-printer/config.toml
+#   Windows: C:\ProgramData\remote-pdf-printer\config.toml
 # Relative Pfade beziehen sich auf den Ordner dieser Datei.
+# Windows-Pfade in einfachen Anführungszeichen schreiben, z.B.  dir = 'D:\Praxis\PDF'
 
 [server]
 # Der Server spricht nur HTTP und lauscht lokal. HTTPS und Zertifikate übernimmt Caddy
@@ -20,13 +23,19 @@ max_upload_mb = 50
 
 [storage]
 # Basisordner; jede Kategorie legt in einem Unterordner davon ab.
+# Windows z.B.:  dir = 'C:\Remote-PDF'
 dir = "/srv/remote-pdf"
 # Platzhalter: {date} {time} {timestamp} {category} {name} (= ursprünglicher Dateiname)
 filename_template = "{date}_{time}_{category}_{name}"
 
 [printing]
-# Druckbefehl (CUPS). Drucker-Namen anzeigen:  lpstat -p   Optionen eines Druckers:  lpoptions -p NAME -l
+# "auto": unter Windows SumatraPDF, sonst CUPS. Oder fest "cups" bzw. "sumatra".
+# Installierte Drucker anzeigen:  remote-pdf-printer -c config.toml printers
+backend = "auto"
+# CUPS: Druckbefehl
 lp_command = "lp"
+# Windows: Pfad zu SumatraPDF.exe (https://www.sumatrapdfreader.org). Weglassen = Standardorte durchsuchen.
+# sumatra_path = 'C:\Program Files\SumatraPDF\SumatraPDF.exe'
 
 [classification]
 # Wie viele Seiten für die Textsuche gelesen werden
@@ -39,7 +48,15 @@ default_category = "a4"
 #   folder  = Unterordner zum Ablegen (weglassen = nicht ablegen)
 #   browser = "suppress": Firefox zeigt/druckt das PDF nicht mehr selbst
 #             "show":     Firefox verhält sich wie bisher (anzeigen/herunterladen/drucken)
-#   [categories.X.print] = drucken (weglassen = nicht drucken)
+#   [categories.X.print] = drucken (weglassen = nicht drucken):
+#       printer     = Druckername, genau wie bei "printers" angezeigt
+#       paper       = "A3" | "A4" | "A5" | "A6" | "Letter" | "Legal"  (weglassen = Druckerstandard)
+#       scaling     = "fit" (an Seite anpassen) | "shrink" (nur verkleinern) | "none"
+#       orientation = "auto" | "portrait" | "landscape"
+#       duplex      = "none" | "long" | "short"  (weglassen = Druckerstandard)
+#       copies      = 1
+#       options          = ["..."]  zusätzliche CUPS-Optionen (lp -o), nur Linux
+#       sumatra_settings = ["..."]  zusätzliche SumatraPDF-Druckeinstellungen, nur Windows (z.B. "bin=2")
 # Schlägt Ablegen oder Drucken fehl, zeigt Firefox das PDF immer normal an.
 # ---------------------------------------------------------------------------------------
 
@@ -49,7 +66,8 @@ folder = "rezepte"
 browser = "suppress"
 [categories.rezept.print]
 printer = "Rezeptdrucker"
-options = ["media=A6", "fit-to-page"]
+paper = "A6"
+scaling = "fit"
 copies = 1
 
 [categories.rechnung]
@@ -69,7 +87,9 @@ folder = "a4"
 browser = "suppress"
 [categories.a4.print]
 printer = "A4-Drucker"
-options = ["media=A4", "fit-to-page", "sides=one-sided"]
+paper = "A4"
+scaling = "fit"
+duplex = "none"
 
 # ---------------------------------------------------------------------------------------
 # Regeln: werden der Reihe nach geprüft, die erste passende gewinnt.

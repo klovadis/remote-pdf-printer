@@ -15,12 +15,14 @@ Firefox (WebApp)                         Druckserver (Linux im LAN)
 └──────────────────────────┘
 ```
 
+Der Server läuft unter **Linux** (Druck über CUPS) und unter **Windows** (Druck über SumatraPDF).
+
 Die Regeln liegen ausschließlich auf dem Server (`config.toml`). Pro Dokumenttyp ist festgelegt:
 
 | Einstellung | Bedeutung |
 |---|---|
 | `folder` | Unterordner zum Ablegen (weglassen = nicht ablegen) |
-| `[…print]` | Drucker, CUPS-Optionen, Kopien (weglassen = nicht drucken) |
+| `[…print]` | Drucker, Papierformat, Skalierung, Ausrichtung, Duplex, Kopien (weglassen = nicht drucken) |
 | `browser` | `suppress`: Firefox zeigt/druckt das PDF nicht mehr selbst · `show`: Firefox verhält sich wie bisher |
 
 Wenn Server, Ablage oder Drucker nicht funktionieren, zeigt Firefox das PDF **immer normal an**.
@@ -30,14 +32,16 @@ Die mitgelieferte Beispielkonfiguration enthält vier Dokumenttypen:
 
 | Typ | Erkennung | Aktion | Firefox |
 |---|---|---|---|
-| Rezept | Seitenformat A6 | ablegen + Rezeptdrucker (`media=A6`) | ausblenden |
+| Rezept | Seitenformat A6 | ablegen + Rezeptdrucker (Papier A6) | ausblenden |
 | Rechnung | Text „Rechnung“, „Rechnungsnummer“, „Liquidation“, „Quittung“ | ablegen in `rechnungen/` | ausblenden |
 | Befund/Arztbrief | Text „Arztbrief“, „Befund“, … | ablegen | anzeigen |
 | A4 (alles andere) | – | ablegen + A4-Drucker | ausblenden |
 
 ---
 
-## 1. Server einrichten (Debian/Ubuntu/Raspberry Pi OS)
+## 1. Server unter Linux einrichten (Debian/Ubuntu/Raspberry Pi OS)
+
+Unter Windows: siehe [Abschnitt 1b](#1b-server-unter-windows-einrichten).
 
 Voraussetzungen: Python ≥ 3.11, CUPS mit eingerichteten Druckern (`lpstat -p` zeigt die Namen) und
 [Caddy](https://caddyserver.com) als Reverse Proxy. Der Druckserver selbst spricht nur HTTP auf
@@ -68,9 +72,17 @@ In `/etc/remote-pdf-printer/config.toml` anpassen:
   Läuft Caddy auf demselben Rechner, passt der Standard (`127.0.0.1`).
 - `host`/`port`: Standard ist `127.0.0.1:8080`, also nur lokal für Caddy erreichbar. Läuft Caddy auf einem
   anderen Rechner, `host` auf die LAN-Adresse setzen und Caddys Adresse bei `trusted_proxies` eintragen.
-- Druckernamen (`printer = …`) und Optionen (verfügbare Optionen: `lpoptions -p DRUCKER -l`)
+- Druckernamen (`printer = …`, Liste mit dem Befehl `printers`, siehe unten) und Druckeinstellungen
+  (`paper`, `scaling`, `orientation`, `duplex`, `copies`). Diese Einstellungen gelten unter Linux und Windows
+  gleich. Weitere CUPS-Optionen lassen sich mit `options = [...]` ergänzen. Welche ein Drucker kennt, zeigt
+  `lpoptions -p DRUCKER -l`.
 
-Prüfen und Regeln mit echten PDFs testen. Dabei wird nichts gedruckt oder abgelegt:
+Drucker anzeigen, Konfiguration prüfen und Regeln mit echten PDFs testen. Dabei wird nichts gedruckt
+oder abgelegt:
+
+```bash
+/opt/remote-pdf-printer/venv/bin/remote-pdf-printer -c /etc/remote-pdf-printer/config.toml printers
+```
 
 ```bash
 /opt/remote-pdf-printer/venv/bin/remote-pdf-printer -c /etc/remote-pdf-printer/config.toml check
@@ -95,6 +107,50 @@ angepasst werden. Der Dienstbenutzer muss drucken dürfen. Bei Standard-CUPS ist
 Die abgelegten Dateien heißen standardmäßig `2026-11-15_14-03-22_rechnung_<Originalname>.pdf`. Sie werden
 zuerst als versteckte Datei geschrieben und dann umbenannt. Programme, die den Ordner überwachen,
 sehen also nie halb geschriebene PDFs.
+
+## 1b. Server unter Windows einrichten
+
+Unter Windows druckt der Server mit [SumatraPDF](https://www.sumatrapdfreader.org), einem kleinen
+kostenlosen PDF-Programm. Es kann PDFs ohne Dialog auf einem bestimmten Drucker mit vorgegebenem
+Papierformat drucken.
+
+1. **Python ≥ 3.11** von <https://www.python.org/downloads/windows/> installieren.
+2. **SumatraPDF** installieren. Der Server findet es automatisch, wenn es an einem der üblichen Orte liegt
+   (`%LOCALAPPDATA%\SumatraPDF`, `C:\Program Files\SumatraPDF`). Bei der portablen Version den Pfad in der
+   `config.toml` bei `sumatra_path` eintragen.
+3. Repository herunterladen (*Code → Download ZIP* auf GitHub, entpacken) und darin eine PowerShell öffnen.
+4. Installieren. Das richtet eine Python-Umgebung unter `%LOCALAPPDATA%\remote-pdf-printer` ein, legt
+   `C:\ProgramData\remote-pdf-printer\config.toml` mit zufälligem Token an und zeigt die installierten
+   Drucker an:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File deploy\windows\install.ps1
+   ```
+5. In `C:\ProgramData\remote-pdf-printer\config.toml` die Druckernamen genau so eintragen, wie sie
+   angezeigt wurden. Der Ablageordner ist `C:\Remote-PDF`. Windows-Pfade in der Datei in **einfache**
+   Anführungszeichen setzen, z. B. `dir = 'D:\Praxis\PDF'`.
+6. Zum Testen im Vordergrund starten (Beenden mit Strg+C):
+   ```powershell
+   & "$env:LOCALAPPDATA\remote-pdf-printer\venv\Scripts\python.exe" -m remote_pdf_printer -c "$env:ProgramData\remote-pdf-printer\config.toml"
+   ```
+   Mit `check`, `printers` oder `classify Datei.pdf` am Ende des Befehls lassen sich Konfiguration, Drucker
+   und Regeln prüfen.
+7. Automatisch bei der Anmeldung starten, ohne Fenster. Das Protokoll steht dann in
+   `C:\ProgramData\remote-pdf-printer\server.log`:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File deploy\windows\register-task.ps1
+   ```
+   Entfernen mit demselben Befehl und `-Remove` am Ende. Meldet Windows „Zugriff verweigert“, die
+   PowerShell einmal als Administrator starten.
+
+**Firefox auf demselben Windows-PC:** Dann ist Caddy nicht nötig. In der Erweiterung als Server-Adresse
+`http://127.0.0.1:8080` eintragen. Die Daten verlassen den Rechner dabei nicht.
+
+**Firefox auf einem anderen PC:** Wie unter Linux Caddy davorschalten (gibt es auch für Windows, siehe
+Abschnitt 2), sonst gehen die PDFs unverschlüsselt durchs Netz. Läuft Caddy auf einem anderen Rechner,
+`host` auf die LAN-Adresse setzen und den Port in der Windows-Firewall freigeben.
+
+Unterschied zu Linux: Der Server läuft als der angemeldete Benutzer und nur, solange dieser angemeldet ist.
+Dafür kann er alle Drucker dieses Benutzers verwenden, auch Netzwerkdrucker.
 
 ## 2. Caddy einrichten
 
