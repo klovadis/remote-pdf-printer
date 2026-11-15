@@ -215,6 +215,45 @@ try {
     assert.equal(stored("a4").length, 1);
   });
 
+  // Like common print helpers: create iframe, set src, append, print in onload.
+  const printViaIframe = (name, extra) =>
+    page.evaluate(
+      async ([n, x]) => {
+        const blob = await (await fetch("/" + n + "?inline")).blob();
+        const f = document.createElement("iframe");
+        f.style.display = "none";
+        const events = [];
+        f.onload = () => {
+          const w = f.contentWindow;
+          let href;
+          try {
+            href = w.location ? w.location.href : "(stub)";
+          } catch {
+            href = "(cross-origin)";
+          }
+          events.push(href);
+          w.print = w.print; // touch like real code would
+        };
+        f.src = URL.createObjectURL(new Blob([blob, x], { type: "application/pdf" }));
+        document.body.append(f); // inserting fires a load event for about:blank
+        await new Promise((r) => setTimeout(r, 2000));
+        return events;
+      },
+      [name, extra]
+    );
+
+  await check("Rechnung im iframe (Druckhilfe-Muster): kein load/print auf about:blank", async () => {
+    const events = await printViaIframe("rechnung.pdf", "   ");
+    assert.deepEqual(events, [], "Seite hat load-Ereignisse gesehen und würde drucken: " + JSON.stringify(events));
+    assert.equal(stored("rechnungen").length, 1);
+  });
+
+  await check("Befund im iframe (Druckhilfe-Muster): load erst mit dem echten PDF", async () => {
+    const events = await printViaIframe("befund.pdf", "    ");
+    assert.equal(events.length, 1, "erwartet genau ein load-Ereignis: " + JSON.stringify(events));
+    assert.ok(events[0].startsWith("blob:"), "load kam von " + events[0]);
+  });
+
   await check("Rechnung als echter Download wird abgelegt und der Download entfernt", async () => {
     const downloads = [];
     page.on("download", (d) => downloads.push(d));
@@ -225,7 +264,7 @@ try {
       a.click();
     });
     await sleep(2500);
-    assert.equal(stored("rechnungen").length, 1, "Rechnung nicht abgelegt");
+    assert.equal(stored("rechnungen").length, 2, "Rechnung nicht abgelegt");
     const list = await worker.evaluate(() => chrome.downloads.search({}));
     assert.equal(list.filter((d) => d.url.includes("rechnung.pdf")).length, 0, "Download ist noch in der Liste: " + JSON.stringify(list));
   });

@@ -28,6 +28,10 @@
   const tracked = new Map(); // blob: URL -> {blob, decision?: Promise}
   const suppressedUrls = new Set(); // URLs the background blocked (http iframes)
   const suppressedFrames = new WeakSet(); // iframes/embeds whose PDF was suppressed
+  // iframes/embeds whose PDF is held back while the server decides. Without a src they show
+  // about:blank; their "load" events and print() calls must not reach the page, otherwise it
+  // prints an empty about:blank page.
+  const heldFrames = new WeakSet();
   const waiting = new Map(); // request id -> resolve
   let seq = 0;
 
@@ -205,11 +209,36 @@
   // --- iframes / embeds / objects --------------------------------------------------------------
   function holdFrame(el, url, apply, method) {
     log(method + " abgefangen", url);
+    heldFrames.add(el);
     decide(url, method, el.getAttribute("title") || "").then((d) => {
-      if (d.browser === "show") apply();
-      else suppressedFrames.add(el);
+      if (d.browser === "show") {
+        heldFrames.delete(el);
+        apply(); // the PDF loads now; its load event reaches the page as usual
+      } else {
+        suppressedFrames.add(el);
+        heldFrames.delete(el);
+      }
     });
   }
+
+  function isBlockedFrame(el) {
+    return heldFrames.has(el) || suppressedFrames.has(el) || (suppressedUrls.size > 0 && suppressedUrls.has(el.src));
+  }
+
+  // "load" does not bubble, but it passes the capture phase of the document (not the window –
+  // load events of elements stop at the document) before it reaches the iframe. Stop it there
+  // for held/suppressed frames, e.g. the about:blank load when the iframe is inserted.
+  document.addEventListener(
+    "load",
+    (event) => {
+      const t = event.target;
+      if ((t instanceof HTMLIFrameElement || t instanceof HTMLEmbedElement || t instanceof HTMLObjectElement) && isBlockedFrame(t)) {
+        event.stopImmediatePropagation();
+        log("load-Ereignis eines zurückgehaltenen Frames blockiert");
+      }
+    },
+    true
+  );
 
   function hookUrlProperty(proto, prop, method) {
     const desc = Object.getOwnPropertyDescriptor(proto, prop);
@@ -244,7 +273,7 @@
   // print() on a suppressed frame must do nothing (it would print an empty page).
   const frameStub = {
     print() {
-      log("print() auf unterdrücktem Frame ignoriert");
+      log("print() auf zurückgehaltenem/unterdrücktem Frame ignoriert");
     },
     focus() {},
     blur() {},
@@ -259,7 +288,7 @@
     Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
       ...cwDesc,
       get() {
-        if (suppressedFrames.has(this) || (suppressedUrls.size && suppressedUrls.has(this.src))) return frameStub;
+        if (isBlockedFrame(this)) return frameStub;
         return cwDesc.get.call(this);
       },
     });
