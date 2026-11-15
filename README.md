@@ -152,6 +152,17 @@ Papierformat drucken.
 Abschnitt 2), sonst gehen die PDFs unverschlüsselt durchs Netz. Läuft Caddy auf einem anderen Rechner,
 `host` auf die LAN-Adresse setzen und den Port in der Windows-Firewall freigeben.
 
+**Wenn nicht gedruckt wird:** Der Server prüft vor jedem Druck, ob der eingetragene Drucker unter Windows
+existiert, und nennt sonst die installierten Namen. Meldet SumatraPDF selbst einen Fehler, steht im Protokoll
+der genaue Befehl. Diesen in der PowerShell ohne `-silent` ausführen, dann zeigt SumatraPDF den Grund an:
+
+```powershell
+& "C:\Pfad\zu\SumatraPDF.exe" -print-to "Druckername" -print-settings "fit,paper=A6" "C:\Remote-PDF\rezepte\datei.pdf"
+```
+
+Klappt es mit `-print-to-default` statt `-print-to "Druckername"`, stimmt der Druckername nicht. Klappt es
+ohne `paper=A6`, unterstützt der Drucker dieses Papierformat nicht unter diesem Namen.
+
 Unterschied zu Linux: Der Server läuft als der angemeldete Benutzer und nur, solange dieser angemeldet ist.
 Dafür kann er alle Drucker dieses Benutzers verwenden, auch Netzwerkdrucker.
 

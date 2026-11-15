@@ -17,3 +17,6 @@ remote-pdf-printer = "remote_pdf_printer.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["remote_pdf_printer*"]
+
+[tool.pytest.ini_options]
+markers = ["real_printer_lookup: test uses the printer lookup instead of the disabled default"]

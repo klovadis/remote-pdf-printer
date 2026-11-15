@@ -7,6 +7,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 from .config import PRINT_PAPERS, PrintingSettings, PrintSettings
@@ -111,8 +113,9 @@ def print_pdf(printing: PrintingSettings, s: PrintSettings, data: bytes, title: 
             fh.write(data)
         path = Path(tmp)
     try:
+        ensure_printer_installed(printing, s.printer)
         cmd = build_command(printing, s, path, title)
-        log.info("Drucke: %s", subprocess.list2cmdline(cmd) if os.name == "nt" else " ".join(cmd))
+        log.info("Drucke: %s", _cmdline(cmd))
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=120, creationflags=_NO_WINDOW)
         except FileNotFoundError as exc:
@@ -120,9 +123,18 @@ def print_pdf(printing: PrintingSettings, s: PrintSettings, data: bytes, title: 
             raise PrintError(f"Druckbefehl {cmd[0]!r} nicht gefunden ({hint})") from exc
         except subprocess.TimeoutExpired as exc:
             raise PrintError("Zeitüberschreitung beim Drucken") from exc
+        output = _clean_output((res.stderr or "") + "\n" + (res.stdout or ""))
         if res.returncode != 0:
-            raise PrintError((res.stderr or res.stdout or f"Exit-Code {res.returncode}").strip())
-        return res.stdout.strip() or "ok"
+            if printing.backend == "sumatra":
+                # With -silent SumatraPDF does not say why; running without it shows an error dialog.
+                manual = _cmdline([c for c in cmd if c != "-silent"])
+                raise PrintError(
+                    f"SumatraPDF meldet einen Fehler (Exit-Code {res.returncode})"
+                    + (f": {output}" if output else "")
+                    + f". Zum Nachsehen ohne -silent von Hand ausführen: {manual}"
+                )
+            raise PrintError(output or f"Exit-Code {res.returncode}")
+        return output or "ok"
     finally:
         # lp copies the file into the spool before returning; SumatraPDF has finished
         # spooling when it exits. Deleting is therefore safe.
@@ -133,13 +145,64 @@ def print_pdf(printing: PrintingSettings, s: PrintSettings, data: bytes, title: 
                 log.warning("Temporäre Datei %s konnte nicht gelöscht werden: %s", tmp, exc)
 
 
+def _cmdline(cmd: list[str]) -> str:
+    return subprocess.list2cmdline(cmd) if os.name == "nt" else " ".join(cmd)
+
+
+def _clean_output(text: str) -> str:
+    # SumatraPDF writes its argument parsing ("ParseFlags: ...") to stdout – not useful for users.
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line and not line.startswith("ParseFlags:"))
+
+
+_printer_cache: tuple[float, list[str]] | None = None
+_printer_lock = threading.Lock()
+PRINTER_CACHE_SECONDS = 300
+
+
+def installed_printers(printing: PrintingSettings) -> list[str] | None:
+    """Installed printer names (cached), or None if they cannot be determined."""
+    global _printer_cache
+    with _printer_lock:
+        if _printer_cache and time.monotonic() - _printer_cache[0] < PRINTER_CACHE_SECONDS:
+            return _printer_cache[1]
+        try:
+            names = list_printers(printing)
+        except PrintError as exc:
+            log.debug("Druckerliste nicht verfügbar: %s", exc)
+            return None
+        _printer_cache = (time.monotonic(), names)
+        return names
+
+
+def ensure_printer_installed(printing: PrintingSettings, name: str) -> None:
+    global _printer_cache
+    names = installed_printers(printing)
+    if names is None or name in names:
+        return
+    # Maybe installed in the meantime: refresh once.
+    with _printer_lock:
+        _printer_cache = None
+    names = installed_printers(printing)
+    if names is None or name in names:
+        return
+    similar = [n for n in names if name.lower() in n.lower() or n.lower() in name.lower()]
+    hint = f" Meinten Sie {similar[0]!r}?" if similar else ""
+    raise PrintError(
+        f"Drucker {name!r} ist nicht installiert.{hint} Installierte Drucker: {', '.join(names) or 'keine'} "
+        "(Name in config.toml genau so eintragen)"
+    )
+
+
 def list_printers(printing: PrintingSettings) -> list[str]:
     if printing.backend == "sumatra" or os.name == "nt":
-        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", "Get-Printer | Select-Object -ExpandProperty Name"]
+        script = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Printer | Select-Object -ExpandProperty Name"
+        cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", script]
     else:
         cmd = ["lpstat", "-e"]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30, creationflags=_NO_WINDOW)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=30, creationflags=_NO_WINDOW)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise PrintError(f"Drucker konnten nicht ermittelt werden: {exc}") from exc
     if res.returncode != 0:

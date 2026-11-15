@@ -292,3 +292,32 @@ def test_store_without_hardlinks(tmp_path, monkeypatch):
     assert (a.name, b.name) == ("x.pdf", "x_2.pdf")
     assert a.read_bytes() == b"%PDF-a" and b.read_bytes() == b"%PDF-b"
     assert not list(tmp_path.glob(".incoming-*"))
+
+
+def test_sumatra_error_is_explained(tmp_path):
+    exe = tmp_path / "SumatraPDF.exe"
+    exe.write_text("#!/bin/sh\necho \"ParseFlags: argName: '-print-to', arg: 33\"\necho \"ParseFlags: argName: '-silent', arg: 1\"\nexit 1\n")
+    exe.chmod(0o755)
+    with pytest.raises(PrintError) as info:
+        print_pdf(PrintingSettings(backend="sumatra", sumatra_path=str(exe)), PrintSettings(printer="HP", paper="A6"),
+                  make_pdf(105, 148), "Rezept")
+    msg = str(info.value)
+    assert "Exit-Code 1" in msg and "ParseFlags" not in msg
+    assert "ohne -silent" in msg and "-print-to HP -print-settings fit,paper=A6 /" in msg
+
+
+@pytest.mark.real_printer_lookup
+def test_unknown_printer_is_reported(monkeypatch, tmp_path):
+    import remote_pdf_printer.printing as printing_mod
+    monkeypatch.setattr(printing_mod, "_printer_cache", None)
+    monkeypatch.setattr(printing_mod, "list_printers", lambda p: ["HP75B446 (HP Smart Tank 7300)", "Microsoft Print to PDF"])
+    lp = tmp_path / "lp"
+    lp.write_text("#!/bin/sh\nexit 0\n")
+    lp.chmod(0o755)
+    with pytest.raises(PrintError) as info:
+        print_pdf(PrintingSettings(backend="cups", lp_command=str(lp)), PrintSettings(printer="HP75B446"), make_pdf(105, 148), "x")
+    msg = str(info.value)
+    assert "'HP75B446' ist nicht installiert" in msg and "Meinten Sie 'HP75B446 (HP Smart Tank 7300)'" in msg
+    # correct name prints
+    assert print_pdf(PrintingSettings(backend="cups", lp_command=str(lp)),
+                     PrintSettings(printer="HP75B446 (HP Smart Tank 7300)"), make_pdf(105, 148), "x") == "ok"

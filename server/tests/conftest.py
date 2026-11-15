@@ -58,3 +58,10 @@ def config(tmp_path):
     lp.write_text(f'#!/bin/sh\necho "$@" >> "{tmp_path / "lp.log"}"\necho "request id is fake-1 (1 file(s))"\n')
     lp.chmod(0o755)
     return load_config(cfg_path)
+
+
+@pytest.fixture(autouse=True)
+def no_printer_lookup(monkeypatch, request):
+    """Tests must not depend on printers installed on the developer machine."""
+    if "real_printer_lookup" not in request.keywords:
+        monkeypatch.setattr("remote_pdf_printer.printing.installed_printers", lambda printing: None)
