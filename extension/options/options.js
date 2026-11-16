@@ -47,11 +47,12 @@ function originPattern(url) {
 
 function describeHealth(res) {
   if (!res.ok) return [`Fehler: ${res.error}`, false];
-  const lines = res.categories.map((c) => {
+  const lines = (Array.isArray(res.categories) ? res.categories : []).map((c) => {
     const actions = [c.printer && `druckt auf ${c.printer}`, c.stores && "legt ab", c.browser === "suppress" ? "Browser: ausblenden" : "Browser: anzeigen"];
-    return `  • ${c.label}: ${actions.filter(Boolean).join(", ")}`;
+    return `  • ${c.label || c.name}: ${actions.filter(Boolean).join(", ")}`;
   });
-  return [`Verbunden mit Server ${res.version}. Kategorien:\n${lines.join("\n")}`, true];
+  const version = res.version ? ` ${res.version}` : "";
+  return [`Verbunden mit Server${version}.` + (lines.length ? ` Kategorien:\n${lines.join("\n")}` : ""), true];
 }
 
 ext.storage.local.get(DEFAULTS).then((s) => {

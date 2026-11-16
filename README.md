@@ -317,16 +317,11 @@ nicht eingetragenen Domains inaktiv bleibt. Voraussetzungen sind Playwright mit 
 cd extension && PYTHON=../server/.venv/bin/python npm run test:chrome
 ```
 
-API:
+## Server-API
 
-- `GET /api/health`: Status und Kategorien
-- `POST /api/documents`: Body ist das PDF. Header: `Authorization: Bearer <token>`, optional
-  `X-Filename` und `X-Source-Url` (URL-kodiert) sowie `X-Capture-Method`. Mit `?dry_run=1` wird nur
-  klassifiziert. Die Antwort ist JSON mit `category`, `label`, `browser` (`show`/`suppress`), `stored`,
-  `printed` und `errors`.
-- Anfragen von Browser-Erweiterungen (`chrome-extension://`, `moz-extension://`) beantwortet der Server
-  auch ursprungsübergreifend (CORS, inklusive `OPTIONS`-Vorabfrage). Webseiten dürfen das nicht, und das
-  Token ist in jedem Fall nötig.
+Die Erweiterung spricht mit dem Server über zwei Endpunkte: `GET /api/health` und `POST /api/documents`.
+Die vollständige Beschreibung mit allen Feldern, Statuscodes, CORS-Verhalten und einem minimalen
+Beispielserver steht in [`docs/API.md`](docs/API.md). Damit lässt sich auch ein eigener Server schreiben.
 
 ## Datenschutz
 

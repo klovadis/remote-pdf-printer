@@ -122,11 +122,11 @@ async function postToServer(bytes, meta) {
     }
     const decision = body.browser === "suppress" ? "suppress" : "show";
     Object.assign(entry, {
-      label: body.label || body.category,
+      label: body.label || body.category || "Dokument",
       browser: decision,
       printed: body.printed?.printer || null,
       stored: !!body.stored,
-      error: (body.errors || []).join("; ") || null,
+      error: (Array.isArray(body.errors) ? body.errors : []).join("; ") || null,
       duplicate: !!body.duplicate,
     });
     const ms = Math.round(performance.now() - started);
