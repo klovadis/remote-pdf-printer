@@ -6,19 +6,16 @@
 # Windows-Pfade in einfachen Anführungszeichen schreiben, z.B.  dir = 'D:\Praxis\PDF'
 
 [server]
-# Der Server spricht nur HTTP und lauscht lokal. HTTPS und Zertifikate übernimmt Caddy
-# (siehe deploy/Caddyfile), das Anfragen an diese Adresse weiterleitet.
+# Der Server spricht nur unverschlüsseltes HTTP (kein HTTPS).
+# "127.0.0.1" = nur vom selben Rechner erreichbar. Damit ein Browser auf einem anderen PC ihn erreicht,
+# "0.0.0.0" (alle Netzwerkkarten) oder die LAN-Adresse dieses Rechners eintragen.
 host = "127.0.0.1"
 port = 8080
 # Geheimes Token (mind. 16 Zeichen), muss auch in der Browser-Erweiterung eingetragen werden.
 # Erzeugen z.B. mit:  python3 -c "import secrets; print(secrets.token_urlsafe(32))"
 api_token = "BITTE-AENDERN-mindestens-16-zeichen"
 # Optional: nur diese Rechner/Netze dürfen PDFs schicken (leer = alle, Token ist trotzdem Pflicht).
-# Hinter Caddy wird dafür die echte Client-Adresse aus X-Forwarded-For verwendet.
 allowed_clients = ["192.168.0.0/16", "127.0.0.1"]
-# Reverse Proxies, deren X-Forwarded-For-Header vertraut wird. Läuft Caddy auf demselben Rechner,
-# passt der Standard. Läuft Caddy woanders, dessen IP-Adresse hier eintragen.
-trusted_proxies = ["127.0.0.1", "::1"]
 max_upload_mb = 50
 
 [storage]

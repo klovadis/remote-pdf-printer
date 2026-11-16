@@ -117,7 +117,7 @@ async function postToServer(bytes, meta) {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const hint = { 401: " – Token in der Erweiterung stimmt nicht mit api_token überein", 403: " – Adresse nicht in allowed_clients (Server) bzw. vom Proxy gesperrt" }[res.status] || "";
+      const hint = { 401: " – Token in der Erweiterung stimmt nicht mit api_token überein", 403: " – Adresse dieses PCs nicht in allowed_clients (Server)" }[res.status] || "";
       throw new ServerError(`Server lehnt ab: HTTP ${res.status}${body.error ? " " + body.error : ""}${hint}`);
     }
     const decision = body.browser === "suppress" ? "suppress" : "show";
@@ -532,7 +532,7 @@ async function checkHealth(serverUrl, token) {
     const msg = err.name === "AbortError" ? "Zeitüberschreitung" : err.message;
     return {
       ok: false,
-      error: `${msg} – laufen Caddy und der Server, vertraut der Browser dem Zertifikat und ist die Berechtigung erteilt?`,
+      error: `${msg} – läuft der Server, stimmt die Adresse und ist die Berechtigung erteilt?`,
     };
   } finally {
     clearTimeout(timer);

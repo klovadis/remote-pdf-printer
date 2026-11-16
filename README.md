@@ -9,16 +9,21 @@ Auf welchen Websites die Erweiterung aktiv ist, wird in ihren Einstellungen fest
 `app.example.org` oder `*.example.org`). Auf allen anderen Seiten tut sie nichts.
 
 ```
-Browser (Web-Anwendung)                    Druckserver (Linux im LAN)
-┌──────────────────────────┐  HTTPS +   ┌───────┐ HTTP  ┌────────────────────────────────────┐
-│ Erweiterung fängt PDF ab │── Token ──▶│ Caddy │──────▶│ erkennt Typ (Format, Text, Name)   │
-│ wartet auf Entscheidung  │◀── JSON ───│ (TLS) │◀──────│ legt ab: /srv/remote-pdf/<typ>/  │
-│ show → wie bisher        │            └───────┘ :8080 │ druckt:  lp -d <Drucker> -o …      │
-│ suppress → ausblenden    │                            └────────────────────────────────────┘
+Browser (Web-Anwendung)                  Druckserver (Linux oder Windows)
+┌──────────────────────────┐   HTTP +    ┌────────────────────────────────────┐
+│ Erweiterung fängt PDF ab │── Token ──▶ │ erkennt Typ (Format, Text, Name)   │
+│ wartet auf Entscheidung  │◀── JSON ─── │ legt ab: /srv/remote-pdf/<typ>/    │
+│ show → wie bisher        │    :8080    │ druckt:  CUPS bzw. SumatraPDF      │
+│ suppress → ausblenden    │             └────────────────────────────────────┘
 └──────────────────────────┘
 ```
 
 Der Server läuft unter **Linux** (Druck über CUPS) und unter **Windows** (Druck über SumatraPDF).
+
+> **Hinweis zur Verschlüsselung:** Der Server spricht nur unverschlüsseltes HTTP. Weil die PDFs vertrauliche
+> Daten enthalten können, wäre eine Verschlüsselung per HTTPS sinnvoll, sobald Browser und Server auf
+> verschiedenen Rechnern laufen. Das ist im Server nicht implementiert. Laufen beide auf demselben Rechner
+> (Server-Adresse `http://127.0.0.1:8080`), verlassen die Daten den Rechner nicht.
 
 Die Regeln liegen ausschließlich auf dem Server (`config.toml`). Pro Dokumenttyp ist festgelegt:
 
@@ -46,12 +51,10 @@ Die mitgelieferte Beispielkonfiguration enthält vier Dokumenttypen:
 
 Unter Windows: siehe [Abschnitt 1b](#1b-server-unter-windows-einrichten).
 
-Voraussetzungen: Python ≥ 3.11, CUPS mit eingerichteten Druckern (`lpstat -p` zeigt die Namen) und
-[Caddy](https://caddyserver.com) als Reverse Proxy. Der Druckserver selbst spricht nur HTTP auf
-`127.0.0.1:8080`. HTTPS und Zertifikate übernimmt Caddy (siehe Abschnitt 2).
+Voraussetzungen: Python ≥ 3.11 und CUPS mit eingerichteten Druckern (`lpstat -p` zeigt die Namen).
 
 ```bash
-sudo apt install python3-venv cups-client caddy
+sudo apt install python3-venv cups-client
 sudo useradd --system --home /nonexistent --shell /usr/sbin/nologin remote-pdf
 sudo git clone https://github.com/klovadis/remote-pdf-printer /opt/remote-pdf-printer
 sudo python3 -m venv /opt/remote-pdf-printer/venv
@@ -70,11 +73,10 @@ sudo chmod 600 /etc/remote-pdf-printer/config.toml
 In `/etc/remote-pdf-printer/config.toml` anpassen:
 
 - `api_token`: neues Geheimnis erzeugen mit `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
-- `allowed_clients`: Netz bzw. IP des Praxis-PCs. Hinter Caddy wird dafür die echte Adresse aus dem
-  Header `X-Forwarded-For` genommen, aber nur, wenn die Anfrage von einem Proxy aus `trusted_proxies` kommt.
-  Läuft Caddy auf demselben Rechner, passt der Standard (`127.0.0.1`).
-- `host`/`port`: Standard ist `127.0.0.1:8080`, also nur lokal für Caddy erreichbar. Läuft Caddy auf einem
-  anderen Rechner, `host` auf die LAN-Adresse setzen und Caddys Adresse bei `trusted_proxies` eintragen.
+- `host`/`port`: Standard ist `127.0.0.1:8080`, also nur vom selben Rechner erreichbar. Läuft der Browser
+  auf einem anderen PC, `host = "0.0.0.0"` (alle Netzwerkkarten) oder die LAN-Adresse des Servers eintragen
+  und den Port gegebenenfalls in der Firewall freigeben. Siehe auch den Hinweis zur Verschlüsselung oben.
+- `allowed_clients`: Netz bzw. IP-Adressen der PCs, die PDFs schicken dürfen.
 - Druckernamen (`printer = …`, Liste mit dem Befehl `printers`, siehe unten) und Druckeinstellungen
   (`paper`, `scaling`, `orientation`, `duplex`, `copies`). Diese Einstellungen gelten unter Linux und Windows
   gleich. Weitere CUPS-Optionen lassen sich mit `options = [...]` ergänzen. Welche ein Drucker kennt, zeigt
@@ -145,12 +147,12 @@ Papierformat drucken.
    Entfernen mit demselben Befehl und `-Remove` am Ende. Meldet Windows „Zugriff verweigert“, die
    PowerShell einmal als Administrator starten.
 
-**Browser auf demselben Windows-PC:** Dann ist Caddy nicht nötig. In der Erweiterung als Server-Adresse
-`http://127.0.0.1:8080` eintragen. Die Daten verlassen den Rechner dabei nicht.
+**Browser auf demselben Windows-PC:** In der Erweiterung als Server-Adresse `http://127.0.0.1:8080`
+eintragen. Die Daten verlassen den Rechner dabei nicht.
 
-**Browser auf einem anderen PC:** Wie unter Linux Caddy davorschalten (gibt es auch für Windows, siehe
-Abschnitt 2), sonst gehen die PDFs unverschlüsselt durchs Netz. Läuft Caddy auf einem anderen Rechner,
-`host` auf die LAN-Adresse setzen und den Port in der Windows-Firewall freigeben.
+**Browser auf einem anderen PC:** In der `config.toml` `host = "0.0.0.0"` oder die LAN-Adresse eintragen und
+den Port in der Windows-Firewall freigeben. In der Erweiterung dann z. B. `http://192.168.1.20:8080`
+eintragen. Die PDFs gehen dabei unverschlüsselt durchs Netz (siehe Hinweis zur Verschlüsselung oben).
 
 **Wenn nicht gedruckt wird:** Der Server prüft vor jedem Druck, ob der eingetragene Drucker unter Windows
 existiert, und nennt sonst die installierten Namen. Meldet SumatraPDF selbst einen Fehler, steht im Protokoll
@@ -166,59 +168,24 @@ ohne `paper=A6`, unterstützt der Drucker dieses Papierformat nicht unter diesem
 Unterschied zu Linux: Der Server läuft als der angemeldete Benutzer und nur, solange dieser angemeldet ist.
 Dafür kann er alle Drucker dieses Benutzers verwenden, auch Netzwerkdrucker.
 
-## 2. Caddy einrichten
+## 2. Erweiterung einrichten
 
-Die Vorlage [`deploy/Caddyfile`](deploy/Caddyfile) nach `/etc/caddy/Caddyfile` kopieren oder per `import`
-in eine bestehende Caddy-Konfiguration einbinden. Hostname bzw. IP-Adresse anpassen, unter der die
-Erweiterung den Server aufrufen soll. Danach:
-
-```bash
-sudo caddy validate --config /etc/caddy/Caddyfile
-```
-
-```bash
-sudo systemctl reload caddy
-```
-
-Für das Zertifikat gibt es zwei Varianten, beide sind in der Vorlage beschrieben:
-
-- **A – Caddys interne CA (`tls internal`):** Das funktioniert ohne eigene Domain und ohne Internetzugang
-  des Servers. Der Browser muss Caddys Root-Zertifikat einmalig vertrauen (siehe Abschnitt 3). Caddy erneuert
-  die Server-Zertifikate selbstständig.
-- **B – Let's Encrypt für eine eigene Domain** (z. B. `druck.meine-praxis.de`, DNS-Eintrag zeigt auf die
-  LAN-Adresse): Let's Encrypt kann einen Rechner im LAN nicht erreichen. Dafür braucht es die DNS-Challenge
-  und einen Caddy-Build mit dem Plugin des DNS-Anbieters. Im Browser ist dann nichts zu importieren.
-
-Die Vorlage lässt zusätzlich zum Token nur private Netze zu und begrenzt Uploads auf 50 MB.
-
-## 3. Browser vorbereiten
-
-1. **Nur bei Variante A: Caddys Root-Zertifikat importieren.** Es liegt auf dem Server unter
-   `/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`. Diese Datei auf den Praxis-PC kopieren.
-   **Nicht** die Datei `root.key` kopieren.
-   - **Firefox:** *Einstellungen → Datenschutz & Sicherheit → Zertifikate anzeigen → Zertifizierungsstellen →
-     Importieren* und *„Dieser CA vertrauen, um Websites zu identifizieren“* anhaken.
-   - **Chrome unter Windows:** Chrome nutzt den Zertifikatsspeicher von Windows. Doppelklick auf `root.crt` →
-     *Zertifikat installieren* → Speicherort *„Vertrauenswürdige Stammzertifizierungsstellen“* wählen.
-   - **Chrome unter Linux:** `chrome://certificate-manager` → eigene Zertifikate → *Importieren*, dann
-     Vertrauen für Websites erteilen.
-
-   Zum Prüfen `https://druckserver.local/api/health` im Browser öffnen: Es darf keine Zertifikatswarnung
-   erscheinen, die Antwort ist `{"error": "invalid token"}`.
-2. Erweiterung installieren (siehe unten) und ihre Einstellungen öffnen:
-   - **Server-Adresse** (z. B. `https://druckserver.local`) und **Token** eintragen.
+1. Erweiterung installieren (siehe unten) und ihre Einstellungen öffnen:
+   - **Server-Adresse** (z. B. `http://127.0.0.1:8080` oder `http://192.168.1.20:8080`) und **Token** eintragen.
    - Unter **„Aktiv auf diesen Websites“** die Domains der Web-Anwendung eintragen, eine pro Zeile.
      `app.example.org` gilt genau für diese Adresse, `*.example.org` für `example.org` und alle Subdomains.
      Eine kopierte vollständige Adresse wie `https://app.example.org/start` wird auf die Domain gekürzt.
    - **Speichern** und die angefragten Berechtigungen erlauben. Die Erweiterung bekommt nur Zugriff auf die
      eingetragenen Websites und den Server. Bereits geöffnete Tabs der Web-Anwendung danach neu laden.
 
-   Unter dem Formular sollte dann „Verbunden mit Server …“ und die Liste der Kategorien stehen.
+   Unter dem Formular sollte dann „Verbunden mit Server …“ und die Liste der Kategorien stehen. Zum Prüfen
+   kann man die Adresse `…/api/health` des Servers auch direkt im Browser öffnen; ohne Token antwortet er mit
+   `{"error": "invalid token"}`.
 
 Über das Symbol in der Symbolleiste lässt sich die Erweiterung ein- und ausschalten. Dort sieht man
 auch die zuletzt verarbeiteten Dokumente.
 
-## 4. Erweiterung installieren
+## 3. Erweiterung installieren
 
 ### Firefox
 
@@ -335,7 +302,7 @@ cd server && python3 -m venv .venv && .venv/bin/pip install -e '.[test]'
 cd server && .venv/bin/pytest
 ```
 
-Server lokal starten (ohne Caddy, nur zum Testen):
+Server lokal starten (zum Testen):
 
 ```bash
 cd server && .venv/bin/remote-pdf-printer -c config.toml
@@ -363,7 +330,8 @@ API:
 
 ## Datenschutz
 
-Die PDFs können vertrauliche Daten enthalten, z. B. Patientendaten. Sie verlassen den Praxis-PC nur in Richtung des eingetragenen
-eigenen Servers und werden dabei per TLS (Caddy) verschlüsselt und per Token authentifiziert. Der Server
+Die PDFs können vertrauliche Daten enthalten, z. B. Patientendaten. Sie verlassen den PC nur in Richtung des
+eingetragenen eigenen Servers. Jede Anfrage braucht das Token, die Übertragung selbst ist aber
+unverschlüsselt (HTTP, siehe Hinweis zur Verschlüsselung oben). Der Server
 protokolliert Dateiname, Format und Kategorie, aber keine Dokumentinhalte. Der Ablageordner sollte
 entsprechend geschützt und gesichert werden.

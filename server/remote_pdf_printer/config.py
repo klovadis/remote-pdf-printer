@@ -80,8 +80,6 @@ class ServerSettings:
     port: int = 8080
     api_tokens: list[str] = field(default_factory=list)
     allowed_clients: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = field(default_factory=list)
-    # Reverse proxies (e.g. Caddy) whose X-Forwarded-For header is trusted.
-    trusted_proxies: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = field(default_factory=list)
     max_upload_mb: float = 50.0
 
 
@@ -230,15 +228,9 @@ def parse_config(raw: dict, base_dir: Path | None = None) -> Config:
         raise ConfigError("server.api_token fehlt (mindestens ein Token ist Pflicht)")
     if any(len(t) < 16 for t in tokens):
         raise ConfigError("server.api_token muss mindestens 16 Zeichen lang sein")
-    if "tls_cert" in s or "tls_key" in s:
-        raise ConfigError(
-            "server.tls_cert/tls_key werden nicht mehr unterstützt: HTTPS übernimmt der Reverse Proxy (Caddy). "
-            "Bitte die beiden Zeilen entfernen."
-        )
-
-    def networks(key, default=()):
+    def networks(key):
         try:
-            return [ipaddress.ip_network(c, strict=False) for c in s.get(key, default)]
+            return [ipaddress.ip_network(c, strict=False) for c in s.get(key, [])]
         except ValueError as exc:
             raise ConfigError(f"server.{key}: {exc}") from exc
 
@@ -247,7 +239,6 @@ def parse_config(raw: dict, base_dir: Path | None = None) -> Config:
         port=int(s.get("port", 8080)),
         api_tokens=tokens,
         allowed_clients=networks("allowed_clients"),
-        trusted_proxies=networks("trusted_proxies", ["127.0.0.1", "::1"]),
         max_upload_mb=float(s.get("max_upload_mb", 50)),
     )
 

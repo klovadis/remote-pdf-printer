@@ -54,7 +54,7 @@ def _cmd_check(cfg) -> int:
     print(f"  Standardkategorie: {cfg.default_category}, {len(cfg.rules)} Regel(n)")
     print(f"  Lauscht auf http://{cfg.server.host}:{cfg.server.port}")
     if not _is_loopback(cfg.server.host):
-        print("WARNUNG: server.host ist nicht 127.0.0.1 – der Server ist dann unverschlüsselt im Netz erreichbar.")
+        print("HINWEIS: server.host ist nicht 127.0.0.1 – der Server ist unverschlüsselt (HTTP) im Netz erreichbar.")
 
     rc = 0
     p = cfg.printing
@@ -143,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
 
     log = logging.getLogger(__name__)
     if not _is_loopback(cfg.server.host):
-        log.warning("server.host=%s: der Server ist ohne Reverse Proxy unverschlüsselt im Netz erreichbar", cfg.server.host)
+        log.warning("server.host=%s: der Server ist unverschlüsselt (HTTP) im Netz erreichbar", cfg.server.host)
     log.info("Druck-Backend: %s", cfg.printing.backend)
 
     from .app import make_server
