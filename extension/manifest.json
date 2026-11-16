@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Remote PDF Printer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fängt PDFs auf frei wählbaren Websites ab und schickt sie an einen eigenen Druckserver im lokalen Netz, der sie je nach Dokumenttyp ablegt und auf dem passenden Drucker druckt.",
   "browser_specific_settings": {
     "gecko": {

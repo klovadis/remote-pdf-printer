@@ -58,7 +58,7 @@ Authorization: Bearer <token>
 ```json
 {
   "ok": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "categories": [
     { "name": "rezept", "label": "Rezept (A6)", "browser": "suppress", "stores": true, "printer": "Rezeptdrucker" },
     { "name": "befund", "label": "Befund / Arztbrief", "browser": "show", "stores": true, "printer": null }
